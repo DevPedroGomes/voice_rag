@@ -13,6 +13,8 @@ interface UseSessionReturn {
   error: string | null;
   documents: SessionDocument[];
   isReady: boolean;
+  queriesRemaining: number;
+  documentsRemaining: number;
   refreshSession: () => Promise<void>;
   clearSession: () => void;
 }
@@ -81,6 +83,8 @@ export function useSession(): UseSessionReturn {
     error,
     documents: session?.documents ?? [],
     isReady: session?.is_ready ?? false,
+    queriesRemaining: session?.queries_remaining ?? 0,
+    documentsRemaining: session?.documents_remaining ?? 0,
     refreshSession,
     clearSession,
   };

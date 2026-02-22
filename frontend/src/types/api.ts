@@ -10,7 +10,9 @@ export type VoiceType =
   | "nova"
   | "sage"
   | "shimmer"
-  | "verse";
+  | "verse"
+  | "marin"
+  | "cedar";
 
 // Session
 export interface SessionDocument {
@@ -27,6 +29,9 @@ export interface SessionResponse {
   expires_at: string;
   documents: SessionDocument[];
   is_ready: boolean;
+  query_count: number;
+  queries_remaining: number;
+  documents_remaining: number;
 }
 
 // Documents
@@ -91,7 +96,7 @@ export interface VoicesResponse {
 // Health
 export interface HealthResponse {
   status: "healthy" | "unhealthy";
-  qdrant_connected: boolean;
+  database_connected: boolean;
 }
 
 // Audio streaming events

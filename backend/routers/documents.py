@@ -34,6 +34,14 @@ async def upload_document(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found or expired")
 
+    # Enforce document limit
+    settings = get_settings()
+    if len(session.documents) >= settings.max_documents_per_session:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Document limit reached ({settings.max_documents_per_session} per session). Restart to create a new session.",
+        )
+
     # Validate file type
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")

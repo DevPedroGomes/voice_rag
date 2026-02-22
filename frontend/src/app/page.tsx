@@ -27,6 +27,8 @@ export default function Home() {
     isLoading: sessionLoading,
     documents,
     isReady,
+    queriesRemaining,
+    documentsRemaining,
     refreshSession,
     clearSession,
   } = useSession();
@@ -94,11 +96,12 @@ export default function Home() {
         if (result.audio_stream_url) {
           playAudio(getAudioStreamUrl(sessionId, result.query_id));
         }
+        await refreshSession();
       } else {
         toast.error(queryError || "Query failed");
       }
     },
-    [sessionId, selectedVoice, submit, playAudio, queryError]
+    [sessionId, selectedVoice, submit, playAudio, queryError, refreshSession]
   );
 
   const handlePlayAudio = useCallback(() => {
@@ -143,9 +146,17 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {session && (
-                <Badge variant="outline" className="text-xs">
-                  Active
-                </Badge>
+                <>
+                  <Badge variant="outline" className="text-xs">
+                    Active
+                  </Badge>
+                  <Badge
+                    variant={queriesRemaining > 0 ? "secondary" : "destructive"}
+                    className="text-xs"
+                  >
+                    {queriesRemaining} {queriesRemaining === 1 ? "query" : "queries"} left
+                  </Badge>
+                </>
               )}
               <Button
                 variant="outline"
@@ -177,12 +188,24 @@ Restart
           <div className="lg:col-span-1 space-y-6">
             {/* Upload */}
             <Card className="p-4">
-              <h2 className="text-sm font-medium mb-3">Upload Documents</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-medium">Upload Documents</h2>
+                {session && (
+                  <Badge variant="outline" className="text-xs">
+                    {documentsRemaining} left
+                  </Badge>
+                )}
+              </div>
               <PDFUpload
                 onUpload={handleUpload}
                 isUploading={isUploading}
-                disabled={!sessionId}
+                disabled={!sessionId || documentsRemaining <= 0}
               />
+              {documentsRemaining <= 0 && (
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  Document limit reached
+                </p>
+              )}
             </Card>
 
             {/* Documents */}
@@ -217,11 +240,16 @@ Restart
               <QueryInput
                 onSubmit={handleQuery}
                 isLoading={queryLoading}
-                disabled={!isReady}
+                disabled={!isReady || queriesRemaining <= 0}
               />
               {!isReady && documents.length === 0 && (
                 <p className="text-sm text-muted-foreground mt-3 text-center">
                   Upload a PDF to get started
+                </p>
+              )}
+              {queriesRemaining <= 0 && (
+                <p className="text-sm text-destructive mt-3 text-center">
+                  Query limit reached. Restart to create a new session.
                 </p>
               )}
             </Card>

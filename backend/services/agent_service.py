@@ -1,14 +1,20 @@
 import os
-from typing import AsyncGenerator
 
 from agents import Agent, Runner
-from openai import AsyncOpenAI
+
+
+DEFAULT_TTS_INSTRUCTIONS = (
+    "Speak in a clear, professional, and friendly tone. "
+    "Use natural pacing with appropriate pauses for comprehension. "
+    "Pronounce technical terms carefully and distinctly. "
+    "Maintain a conversational style that is engaging but informative."
+)
 
 
 class AgentService:
-    """Service for running the RAG processor and TTS agents."""
+    """Service for running the RAG processor agent."""
 
-    def __init__(self, openai_api_key: str):
+    def __init__(self, openai_api_key: str, processor_model: str = "gpt-4.1-mini"):
         os.environ["OPENAI_API_KEY"] = openai_api_key
         self._openai_api_key = openai_api_key
 
@@ -20,20 +26,9 @@ class AgentService:
 3. Include relevant examples when available
 4. Cite the source files when referencing specific content
 5. Keep responses natural and conversational
-6. Format your response in a way that's easy to speak out loud""",
-            model="gpt-4o",
-        )
-
-        self._tts_agent = Agent(
-            name="Text-to-Speech Agent",
-            instructions="""You are a text-to-speech agent. Your task is to:
-1. Convert the processed documentation response into natural speech
-2. Maintain proper pacing and emphasis
-3. Handle technical terms clearly
-4. Keep the tone professional but friendly
-5. Use appropriate pauses for better comprehension
-6. Ensure the speech is clear and well-articulated""",
-            model="gpt-4o",
+6. Format your response in a way that's easy to speak out loud
+7. Use short sentences and clear language for better TTS output""",
+            model=processor_model,
         )
 
     async def process_query(
@@ -65,15 +60,11 @@ class AgentService:
         context_str += f"\nUser Question: {query}\n\n"
         context_str += "Please provide a clear, concise answer that can be easily spoken out loud."
 
-        # Generate text response
+        # Generate text response (single LLM call)
         processor_result = await Runner.run(self._processor_agent, context_str)
         text_response = processor_result.final_output
 
-        # Generate voice instructions
-        tts_result = await Runner.run(self._tts_agent, text_response)
-        voice_instructions = tts_result.final_output
-
-        return text_response, voice_instructions, sources
+        return text_response, DEFAULT_TTS_INSTRUCTIONS, sources
 
 
 # Singleton instance
@@ -86,5 +77,8 @@ def get_agent_service() -> AgentService:
     if _agent_service is None:
         from config import get_settings
         settings = get_settings()
-        _agent_service = AgentService(openai_api_key=settings.openai_api_key)
+        _agent_service = AgentService(
+            openai_api_key=settings.openai_api_key,
+            processor_model=settings.processor_model,
+        )
     return _agent_service

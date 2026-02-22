@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     # File upload
     max_file_size_mb: int = 10
 
+    # Rate limiting (showcase protection)
+    max_queries_per_session: int = 5
+    max_documents_per_session: int = 3
+    max_sessions_per_minute: int = 10
+
+    # AI models
+    processor_model: str = "gpt-4.1-mini"
+    tts_model: str = "gpt-4o-mini-tts"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -10,8 +10,9 @@ A voice-enabled Retrieval-Augmented Generation system. Upload PDF documents, ask
 | Backend | FastAPI, Python 3.12, OpenAI Agents SDK |
 | Database | PostgreSQL with pgvector extension |
 | Embeddings | FastEmbed (BAAI/bge-small-en-v1.5, 384 dimensions) |
-| LLM | GPT-4o via OpenAI API |
+| LLM | GPT-4.1-mini via OpenAI API (configurable) |
 | TTS | OpenAI gpt-4o-mini-tts |
+| Rate Limiting | 5 queries/session, 3 docs/session, 10 sessions/min |
 
 ## Architecture
 
@@ -77,13 +78,13 @@ A voice-enabled Retrieval-Augmented Generation system. Upload PDF documents, ask
    Build context from retrieved chunks
         │
         ▼
-   Processor Agent (GPT-4o) generates answer
+   Processor Agent (GPT-4.1-mini) generates answer
         │
         ▼
-   TTS Agent optimizes text for speech
+   Static TTS instructions applied
         │
         ▼
-   OpenAI TTS converts to audio
+   gpt-4o-mini-tts converts to audio
         │
         ▼
    SSE stream to frontend → Web Audio API playback
@@ -98,8 +99,8 @@ The backend is a FastAPI application with the following structure:
   - `SessionService`: In-memory session management with 5-minute inactivity timeout
   - `VectorService`: PostgreSQL/pgvector operations for embedding storage and retrieval
   - `EmbeddingService`: Local embedding generation using FastEmbed
-  - `AgentService`: OpenAI Agents SDK for RAG processing
-  - `AudioService`: Text-to-speech generation
+  - `AgentService`: Single Processor Agent (GPT-4.1-mini) for RAG processing
+  - `AudioService`: Text-to-speech generation (gpt-4o-mini-tts)
 
 Multi-tenancy is achieved through session IDs. Each user gets a unique session, and all documents and queries are isolated by session_id in the database.
 
@@ -173,6 +174,11 @@ CREATE EXTENSION IF NOT EXISTS vector;
 - `DATABASE_URL`: PostgreSQL connection string
 - `CORS_ORIGINS`: Allowed frontend origins (JSON array)
 - `SESSION_INACTIVITY_MINUTES`: Session timeout (default: 5)
+- `MAX_QUERIES_PER_SESSION`: Query limit per session (default: 5)
+- `MAX_DOCUMENTS_PER_SESSION`: Document limit per session (default: 3)
+- `MAX_SESSIONS_PER_MINUTE`: Global session creation rate limit (default: 10)
+- `PROCESSOR_MODEL`: LLM model for RAG (default: gpt-4.1-mini)
+- `TTS_MODEL`: TTS model (default: gpt-4o-mini-tts)
 
 ### Frontend
 - `NEXT_PUBLIC_API_URL`: Backend API URL

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { streamAudio, AudioStreamPlayer } from "@/lib/audio-context";
 
 interface UseAudioStreamReturn {
@@ -21,6 +21,13 @@ export function useAudioStream(): UseAudioStreamReturn {
   const [chunksReceived, setChunksReceived] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const playerRef = useRef<AudioStreamPlayer | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      playerRef.current?.stop();
+    };
+  }, []);
 
   const play = useCallback(async (streamUrl: string) => {
     setIsLoading(true);

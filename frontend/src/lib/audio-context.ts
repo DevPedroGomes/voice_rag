@@ -2,6 +2,7 @@ const SAMPLE_RATE = 24000; // OpenAI TTS sample rate
 
 export class AudioStreamPlayer {
   private audioContext: AudioContext | null = null;
+  private eventSource: EventSource | null = null;
   private nextPlayTime = 0;
   private isPlaying = false;
   private isPaused = false;
@@ -14,6 +15,10 @@ export class AudioStreamPlayer {
   ) {
     this.onPlayingChange = onPlayingChange;
     this.onPausedChange = onPausedChange;
+  }
+
+  setEventSource(es: EventSource): void {
+    this.eventSource = es;
   }
 
   async start(): Promise<void> {
@@ -98,6 +103,11 @@ export class AudioStreamPlayer {
     this.onPlayingChange?.(false);
     this.onPausedChange?.(false);
 
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
@@ -124,6 +134,7 @@ export async function streamAudio(
   await player.start();
 
   const eventSource = new EventSource(streamUrl);
+  player.setEventSource(eventSource);
 
   eventSource.addEventListener("audio_chunk", (event) => {
     try {

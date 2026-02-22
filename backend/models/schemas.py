@@ -43,7 +43,8 @@ class SessionCreate(BaseModel):
 
 VoiceType = Literal[
     "alloy", "ash", "ballad", "coral", "echo",
-    "fable", "onyx", "nova", "sage", "shimmer", "verse"
+    "fable", "onyx", "nova", "sage", "shimmer", "verse",
+    "marin", "cedar"
 ]
 
 
@@ -61,6 +62,9 @@ class SessionResponse(BaseModel):
     expires_at: datetime
     documents: list[SessionDocument]
     is_ready: bool
+    query_count: int = 0
+    queries_remaining: int = 5
+    documents_remaining: int = 3
 
 
 class DocumentUploadResponse(BaseModel):

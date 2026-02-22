@@ -15,6 +15,7 @@ from models.schemas import (
     QueryRecord,
     SourceInfo,
 )
+from config import get_settings
 from services.session_service import SessionStore, get_session_store
 from services.vector_service import VectorService, get_vector_service
 from services.embedding_service import EmbeddingService, get_embedding_service
@@ -65,6 +66,14 @@ async def submit_query(
 
     if not session.is_ready:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
+
+    # Enforce query limit
+    settings = get_settings()
+    if len(session.queries) >= settings.max_queries_per_session:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Query limit reached ({settings.max_queries_per_session} per session). Restart to create a new session.",
+        )
 
     try:
         # Generate query embedding (async to not block event loop)

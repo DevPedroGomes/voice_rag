@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import type { QueryResponse, VoiceType } from "@/types/api";
-import { submitQuery } from "@/lib/api-client";
+import { submitQuery, ApiError } from "@/lib/api-client";
 
 interface UseQueryReturn {
   isLoading: boolean;
@@ -41,7 +41,12 @@ export function useQuery(): UseQueryReturn {
         setResponse(result);
         return result;
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Query failed";
+        let message: string;
+        if (err instanceof ApiError && err.status === 429) {
+          message = "Query limit reached. Restart to create a new session.";
+        } else {
+          message = err instanceof Error ? err.message : "Query failed";
+        }
         setError(message);
         return null;
       } finally {

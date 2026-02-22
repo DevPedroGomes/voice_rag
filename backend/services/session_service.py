@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+from collections import deque
 from datetime import datetime, timedelta
 from typing import Callable, Awaitable
 
@@ -12,10 +13,12 @@ logger = logging.getLogger(__name__)
 class SessionStore:
     """Thread-safe in-memory session store with inactivity-based cleanup."""
 
-    def __init__(self, inactivity_minutes: int = 5):
+    def __init__(self, inactivity_minutes: int = 5, max_sessions_per_minute: int = 10):
         self._sessions: dict[str, Session] = {}
         self._lock = asyncio.Lock()
         self._inactivity_minutes = inactivity_minutes
+        self._max_sessions_per_minute = max_sessions_per_minute
+        self._session_creation_timestamps: deque[float] = deque()
         self._cleanup_callback: Callable[[str], Awaitable[None]] | None = None
 
     def set_cleanup_callback(
@@ -29,7 +32,18 @@ class SessionStore:
         return from_time + timedelta(minutes=self._inactivity_minutes)
 
     async def create(self, client_id: str | None = None) -> Session:
-        """Create a new session."""
+        """Create a new session. Raises ValueError if rate limit exceeded."""
+        import time
+        now_ts = time.time()
+        cutoff = now_ts - 60
+        while self._session_creation_timestamps and self._session_creation_timestamps[0] < cutoff:
+            self._session_creation_timestamps.popleft()
+        if len(self._session_creation_timestamps) >= self._max_sessions_per_minute:
+            raise ValueError(
+                f"Too many sessions created. Limit: {self._max_sessions_per_minute} per minute."
+            )
+        self._session_creation_timestamps.append(now_ts)
+
         async with self._lock:
             now = datetime.utcnow()
             session = Session(
@@ -169,5 +183,8 @@ def get_session_store() -> SessionStore:
     if _session_store is None:
         from config import get_settings
         settings = get_settings()
-        _session_store = SessionStore(inactivity_minutes=settings.session_inactivity_minutes)
+        _session_store = SessionStore(
+            inactivity_minutes=settings.session_inactivity_minutes,
+            max_sessions_per_minute=settings.max_sessions_per_minute,
+        )
     return _session_store

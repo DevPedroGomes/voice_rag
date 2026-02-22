@@ -10,8 +10,9 @@ from openai import AsyncOpenAI
 class AudioService:
     """Service for text-to-speech generation with streaming support."""
 
-    def __init__(self, openai_api_key: str):
+    def __init__(self, openai_api_key: str, tts_model: str = "gpt-4o-mini-tts"):
         self._client = AsyncOpenAI(api_key=openai_api_key)
+        self._tts_model = tts_model
         self._temp_dir = tempfile.gettempdir()
 
     async def stream_tts(
@@ -32,7 +33,7 @@ class AudioService:
             Base64-encoded PCM audio chunks
         """
         async with self._client.audio.speech.with_streaming_response.create(
-            model="gpt-4o-mini-tts",
+            model=self._tts_model,
             voice=voice,
             input=text,
             instructions=instructions,
@@ -59,7 +60,7 @@ class AudioService:
             Path to the generated MP3 file
         """
         response = await self._client.audio.speech.create(
-            model="gpt-4o-mini-tts",
+            model=self._tts_model,
             voice=voice,
             input=text,
             instructions=instructions,
@@ -83,5 +84,8 @@ def get_audio_service() -> AudioService:
     if _audio_service is None:
         from config import get_settings
         settings = get_settings()
-        _audio_service = AudioService(openai_api_key=settings.openai_api_key)
+        _audio_service = AudioService(
+            openai_api_key=settings.openai_api_key,
+            tts_model=settings.tts_model,
+        )
     return _audio_service
