@@ -1,4 +1,5 @@
 import asyncio
+import os
 from fastembed import TextEmbedding
 
 
@@ -6,7 +7,7 @@ class EmbeddingService:
     """Service for generating text embeddings using FastEmbed."""
 
     def __init__(self):
-        self._model = TextEmbedding()
+        self._model = TextEmbedding(cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
         # Get embedding dimension from a test embedding
         test_embedding = list(self._model.embed(["test"]))[0]
         self._embedding_dim = len(test_embedding)
