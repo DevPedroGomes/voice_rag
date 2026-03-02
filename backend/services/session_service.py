@@ -59,16 +59,19 @@ class SessionStore:
 
     async def get(self, session_id: str) -> Session | None:
         """Get session by ID, returns None if not found or expired."""
+        needs_cleanup = False
         async with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
                 return None
             if datetime.utcnow() > session.expires_at:
-                # Clean up expired session
-                await self._cleanup_session_data(session_id)
                 del self._sessions[session_id]
-                return None
-            return session
+                needs_cleanup = True
+            else:
+                return session
+        if needs_cleanup:
+            await self._cleanup_session_data(session_id)
+        return None
 
     async def touch(self, session_id: str) -> bool:
         """Update last_activity to extend session expiration."""
@@ -86,9 +89,9 @@ class SessionStore:
         async with self._lock:
             if session_id not in self._sessions:
                 return False
-            await self._cleanup_session_data(session_id)
             del self._sessions[session_id]
-            return True
+        await self._cleanup_session_data(session_id)
+        return True
 
     async def add_document(
         self, session_id: str, document: SessionDocument
@@ -154,10 +157,11 @@ class SessionStore:
                 if now > s.expires_at
             ]
             for sid in expired:
-                logger.info(f"Cleaning up inactive session {sid}")
-                await self._cleanup_session_data(sid)
                 del self._sessions[sid]
-            return len(expired)
+        for sid in expired:
+            logger.info(f"Cleaning up inactive session {sid}")
+            await self._cleanup_session_data(sid)
+        return len(expired)
 
     async def _cleanup_session_data(self, session_id: str) -> None:
         """Clean up external resources for a session."""

@@ -7,8 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
 from routers import session_router, documents_router, query_router
+from routers.query import periodic_cleanup_query_results
 from services.session_service import get_session_store
 from services.vector_service import get_vector_service
+from services.embedding_service import get_embedding_service
+from services.agent_service import get_agent_service
+from services.audio_service import get_audio_service
 
 # Configure logging
 logging.basicConfig(
@@ -62,8 +66,22 @@ async def lifespan(app: FastAPI):
 
     session_store.set_cleanup_callback(cleanup_session_data)
 
-    # Start background cleanup task
+    # Eagerly initialize services to avoid cold start on first request
+    logger.info("Pre-loading embedding model (ONNX)...")
+    await asyncio.to_thread(get_embedding_service)
+    logger.info("Embedding model loaded")
+
+    logger.info("Initializing agent service...")
+    get_agent_service()
+    logger.info("Agent service ready")
+
+    logger.info("Initializing audio service...")
+    get_audio_service()
+    logger.info("Audio service ready")
+
+    # Start background cleanup tasks
     cleanup_task = asyncio.create_task(cleanup_expired_sessions())
+    query_cleanup_task = asyncio.create_task(periodic_cleanup_query_results())
 
     logger.info("Voice RAG API started")
     logger.info(f"Session inactivity timeout: {settings.session_inactivity_minutes} minutes")
@@ -74,8 +92,13 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Voice RAG API...")
     cleanup_task.cancel()
+    query_cleanup_task.cancel()
     try:
         await cleanup_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await query_cleanup_task
     except asyncio.CancelledError:
         pass
     await vector_service.close()

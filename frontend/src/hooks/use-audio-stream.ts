@@ -18,7 +18,7 @@ export function useAudioStream(): UseAudioStreamReturn {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [chunksReceived, setChunksReceived] = useState(0);
+  const chunksReceivedRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const playerRef = useRef<AudioStreamPlayer | null>(null);
 
@@ -33,14 +33,14 @@ export function useAudioStream(): UseAudioStreamReturn {
     setIsLoading(true);
     setIsPlaying(false);
     setIsPaused(false);
-    setChunksReceived(0);
+    chunksReceivedRef.current = 0;
     setError(null);
 
     try {
       playerRef.current = await streamAudio(
         streamUrl,
         (index) => {
-          setChunksReceived(index + 1);
+          chunksReceivedRef.current = index + 1;
           if (index === 0) {
             setIsLoading(false);
             setIsPlaying(true);
@@ -86,7 +86,7 @@ export function useAudioStream(): UseAudioStreamReturn {
     isPlaying,
     isPaused,
     isLoading,
-    chunksReceived,
+    chunksReceived: chunksReceivedRef.current,
     error,
     play,
     stop,

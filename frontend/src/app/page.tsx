@@ -54,7 +54,7 @@ export default function Home() {
         .then((res) => setQueryHistory(res.queries))
         .catch(() => {});
     }
-  }, [sessionId, response]);
+  }, [sessionId]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -97,6 +97,10 @@ export default function Home() {
           playAudio(getAudioStreamUrl(sessionId, result.query_id));
         }
         await refreshSession();
+        // Refresh history after successful query
+        getQueryHistory(sessionId)
+          .then((res) => setQueryHistory(res.queries))
+          .catch(() => {});
       } else {
         toast.error(queryError || "Query failed");
       }

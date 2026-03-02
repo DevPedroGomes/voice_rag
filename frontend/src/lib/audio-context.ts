@@ -64,19 +64,11 @@ export class AudioStreamPlayer {
   async playChunk(base64Chunk: string): Promise<void> {
     if (!this.audioContext || !this.isPlaying) return;
 
-    // Decode base64 to ArrayBuffer
+    // Decode base64 to typed arrays
     const binaryString = atob(base64Chunk);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    // Convert Int16 PCM to Float32
+    const bytes = Uint8Array.from(binaryString, (c) => c.charCodeAt(0));
     const int16Array = new Int16Array(bytes.buffer);
-    const float32Array = new Float32Array(int16Array.length);
-    for (let i = 0; i < int16Array.length; i++) {
-      float32Array[i] = int16Array[i] / 32768.0;
-    }
+    const float32Array = Float32Array.from(int16Array, (s) => s / 32768.0);
 
     // Create audio buffer
     const audioBuffer = this.audioContext.createBuffer(

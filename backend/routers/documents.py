@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -58,8 +59,8 @@ async def upload_document(
                 detail=f"File too large. Maximum size is {settings.max_file_size_mb}MB"
             )
 
-        # Process PDF
-        chunks, page_count = process_pdf(content, file.filename)
+        # Process PDF (run in thread to avoid blocking event loop)
+        chunks, page_count = await asyncio.to_thread(process_pdf, content, file.filename)
 
         if not chunks:
             raise HTTPException(status_code=400, detail="No content extracted from PDF")

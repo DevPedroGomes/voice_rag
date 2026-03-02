@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import uuid
+from collections import OrderedDict
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -28,8 +29,9 @@ router = APIRouter(prefix="/api/session/{session_id}", tags=["query"])
 
 # In-memory storage for query results with TTL (for audio streaming)
 # Structure: {query_id: {"data": {...}, "created_at": timestamp}}
-_query_results: dict[str, dict] = {}
-QUERY_RESULT_TTL_SECONDS = 3600  # 1 hour
+_query_results: OrderedDict[str, dict] = OrderedDict()
+QUERY_RESULT_TTL_SECONDS = 300  # 5 minutes (audio is consumed immediately)
+MAX_QUERY_RESULTS = 100
 
 
 def _cleanup_expired_query_results() -> int:
@@ -103,6 +105,10 @@ async def submit_query(
 
         # Cleanup expired results periodically
         _cleanup_expired_query_results()
+
+        # Evict oldest entry if at capacity
+        while len(_query_results) >= MAX_QUERY_RESULTS:
+            _query_results.popitem(last=False)
 
         # Store query result for audio streaming with timestamp
         _query_results[query_id] = {
@@ -207,6 +213,19 @@ async def stream_audio(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+async def periodic_cleanup_query_results() -> None:
+    """Background task to periodically clean up expired query results."""
+    import asyncio
+    while True:
+        await asyncio.sleep(60)
+        try:
+            removed = _cleanup_expired_query_results()
+            if removed > 0:
+                logger.info(f"Cleaned up {removed} expired query results")
+        except Exception as e:
+            logger.error(f"Error during query results cleanup: {e}")
 
 
 def _cleanup_temp_file(file_path: str) -> None:
