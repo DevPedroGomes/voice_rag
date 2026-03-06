@@ -1,6 +1,6 @@
 import os
 
-from agents import Agent, Runner
+from agents import Agent, Runner, set_tracing_disabled
 
 
 DEFAULT_TTS_INSTRUCTIONS = (
@@ -17,6 +17,9 @@ class AgentService:
     def __init__(self, openai_api_key: str, processor_model: str = "gpt-4.1-mini"):
         os.environ["OPENAI_API_KEY"] = openai_api_key
         self._openai_api_key = openai_api_key
+
+        # Disable tracing to prevent API key leakage in error logs
+        set_tracing_disabled(True)
 
         self._processor_agent = Agent(
             name="Documentation Processor",
