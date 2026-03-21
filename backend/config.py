@@ -1,5 +1,7 @@
+import json
 from functools import lru_cache
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -13,8 +15,20 @@ class Settings(BaseSettings):
     session_inactivity_minutes: int = 5  # Sessions expire after 5 min of inactivity
     cleanup_interval_minutes: int = 1    # Check for expired sessions every 1 min
 
-    # CORS - comma-separated list of origins
+    # CORS - accepts JSON array or comma-separated origins via CORS_ORIGINS env var
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: object) -> list[str]:
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                return json.loads(v)
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
 
     # File upload
     max_file_size_mb: int = 10

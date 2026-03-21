@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CORS_ORIGINS: '["https://voicerag.pgdev.com.br"]'
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - internal
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.voicerag-api.entrypoints=https"
+      - "traefik.http.routers.voicerag-api.rule=Host(`voicerag-api.pgdev.com.br`)"
+      - "traefik.http.routers.voicerag-api.tls=true"
+      - "traefik.http.routers.voicerag-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.voicerag-api.middlewares=voicerag-api-security@docker"
+      - "traefik.http.services.voicerag-api.loadbalancer.server.port=8000"
+      # Security Headers
+      - "traefik.http.middlewares.voicerag-api-security.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.voicerag-api-security.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.voicerag-api-security.headers.stsPreload=true"
+      - "traefik.http.middlewares.voicerag-api-security.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.voicerag-api-security.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.voicerag-api-security.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.voicerag-api-security.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.voicerag-api-security.headers.frameDeny=true"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://voicerag-api.pgdev.com.br
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.voicerag.entrypoints=https"
+      - "traefik.http.routers.voicerag.rule=Host(`voicerag.pgdev.com.br`)"
+      - "traefik.http.routers.voicerag.tls=true"
+      - "traefik.http.routers.voicerag.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.voicerag.middlewares=voicerag-security@docker"
+      - "traefik.http.services.voicerag.loadbalancer.server.port=3000"
+      # Security Headers
+      - "traefik.http.middlewares.voicerag-security.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.voicerag-security.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.voicerag-security.headers.stsPreload=true"
+      - "traefik.http.middlewares.voicerag-security.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.voicerag-security.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.voicerag-security.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.voicerag-security.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.voicerag-security.headers.frameDeny=true"
+
+volumes:
+  pgdata:
+
+networks:
+  proxy:
+    external: true
+  internal:
+    driver: bridge
