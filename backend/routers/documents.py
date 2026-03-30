@@ -59,6 +59,10 @@ async def upload_document(
                 detail=f"File too large. Maximum size is {settings.max_file_size_mb}MB"
             )
 
+        # Validate PDF magic bytes
+        if not content[:5].startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail="File content does not match PDF format")
+
         # Process PDF (run in thread to avoid blocking event loop)
         chunks, page_count = await asyncio.to_thread(process_pdf, content, file.filename)
 

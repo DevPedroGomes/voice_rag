@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -186,12 +187,17 @@ async def stream_audio(
 
     async def event_generator():
         chunk_index = 0
+        start_time = asyncio.get_event_loop().time()
+        max_duration = 300  # 5 minute hard limit
         try:
             async for chunk in audio_service.stream_tts(
                 text=query_data["text_response"],
                 voice=query_data["voice"],
                 instructions=query_data["voice_instructions"],
             ):
+                if asyncio.get_event_loop().time() - start_time > max_duration:
+                    logger.warning(f"Audio stream timeout for query {query_id}")
+                    break
                 data = json.dumps({"chunk": chunk, "index": chunk_index})
                 yield f"event: audio_chunk\ndata: {data}\n\n"
                 chunk_index += 1
