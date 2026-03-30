@@ -1,7 +1,12 @@
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    container_name: voicerag-db
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -20,7 +25,12 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: voicerag-backend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,7 +71,12 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: https://voicerag-api.pgdev.com.br
+    container_name: voicerag-frontend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     depends_on:
       backend:
         condition: service_healthy

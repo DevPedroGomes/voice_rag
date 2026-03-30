@@ -1,8 +1,22 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const ACCEPTED_TYPES = ["application/pdf"];
+
+function validateFile(file: File): string | null {
+  if (!ACCEPTED_TYPES.includes(file.type)) {
+    return "Only PDF files are accepted.";
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    return `File is too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB.`;
+  }
+  return null;
+}
 
 interface PDFUploadProps {
   onUpload: (file: File) => Promise<void>;
@@ -19,11 +33,16 @@ export function PDFUpload({ onUpload, isUploading, disabled }: PDFUploadProps) {
       setIsDragOver(false);
 
       const files = Array.from(e.dataTransfer.files);
-      const pdfFile = files.find((f) => f.type === "application/pdf");
+      const file = files[0];
+      if (!file) return;
 
-      if (pdfFile) {
-        await onUpload(pdfFile);
+      const error = validateFile(file);
+      if (error) {
+        toast.error(error);
+        return;
       }
+
+      await onUpload(file);
     },
     [onUpload]
   );
@@ -31,10 +50,17 @@ export function PDFUpload({ onUpload, isUploading, disabled }: PDFUploadProps) {
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) {
-        await onUpload(file);
+      if (!file) return;
+
+      const error = validateFile(file);
+      if (error) {
+        toast.error(error);
         e.target.value = "";
+        return;
       }
+
+      await onUpload(file);
+      e.target.value = "";
     },
     [onUpload]
   );

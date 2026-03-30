@@ -39,6 +39,7 @@ export default function Home() {
     isPlaying,
     isPaused,
     isLoading: audioLoading,
+    error: audioError,
     play: playAudio,
     stop: stopAudio,
     togglePause,
@@ -52,7 +53,7 @@ export default function Home() {
     if (sessionId) {
       getQueryHistory(sessionId)
         .then((res) => setQueryHistory(res.queries))
-        .catch(() => {});
+        .catch(() => { toast.error("Falha ao carregar historico"); });
     }
   }, [sessionId]);
 
@@ -100,7 +101,7 @@ export default function Home() {
         // Refresh history after successful query
         getQueryHistory(sessionId)
           .then((res) => setQueryHistory(res.queries))
-          .catch(() => {});
+          .catch((err) => { console.error("Failed to refresh query history:", err); });
       } else {
         toast.error(queryError || "Query failed");
       }
@@ -122,12 +123,16 @@ export default function Home() {
 
   if (sessionLoading) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-background to-muted/20">
-        <div className="container max-w-4xl mx-auto py-12 px-4">
+      <main className="min-h-screen bg-[#fafafa]">
+        <div className="sticky top-0 z-50 border-b border-neutral-200 bg-white/90 backdrop-blur-xl">
+          <div className="max-w-5xl mx-auto px-6 sm:px-8 h-16 flex items-center">
+            <Skeleton className="h-8 w-48" />
+          </div>
+        </div>
+        <div className="max-w-5xl mx-auto py-8 px-6 sm:px-8">
           <div className="space-y-6">
-            <Skeleton className="h-12 w-64" />
-            <Skeleton className="h-48 w-full" />
-            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-48 w-full rounded-2xl" />
+            <Skeleton className="h-32 w-full rounded-2xl" />
           </div>
         </div>
       </main>
@@ -135,65 +140,73 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-background to-muted/20">
-      <div className="container max-w-4xl mx-auto py-12 px-4">
-        {/* Header */}
-        <header className="mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <main className="min-h-screen bg-[#fafafa]">
+      {/* Sticky Header Bar */}
+      <header className="sticky top-0 z-50 border-b border-neutral-200 bg-white/90 backdrop-blur-xl">
+        <div className="max-w-5xl mx-auto px-6 sm:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="Logo" className="h-9 w-9 rounded-lg object-cover" />
             <div>
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-900">
                 Voice RAG
               </h1>
-              <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-                Ask questions about your documents and get voice-powered answers
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {session && (
-                <>
-                  <Badge variant="outline" className="text-xs">
-                    Active
-                  </Badge>
-                  <Badge
-                    variant={queriesRemaining > 0 ? "secondary" : "destructive"}
-                    className="text-xs"
-                  >
-                    {queriesRemaining} {queriesRemaining === 1 ? "query" : "queries"} left
-                  </Badge>
-                </>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRestart}
-                className="flex items-center gap-2"
-              >
-                <svg
-                  className="w-4 h-4 shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-Restart
-              </Button>
             </div>
           </div>
-        </header>
+          <div className="flex items-center gap-2 shrink-0">
+            {session && (
+              <>
+                <Badge variant="outline" className="text-xs">
+                  Active
+                </Badge>
+                <Badge
+                  variant={queriesRemaining > 0 ? "secondary" : "destructive"}
+                  className="text-xs"
+                >
+                  {queriesRemaining} {queriesRemaining === 1 ? "query" : "queries"} left
+                </Badge>
+              </>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRestart}
+              className="flex items-center gap-2"
+            >
+              <svg
+                className="w-4 h-4 shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              Restart
+            </Button>
+          </div>
+        </div>
+      </header>
 
+      {/* Subtitle below header */}
+      <div className="max-w-5xl mx-auto px-6 sm:px-8 pt-8 pb-2">
+        <p className="text-neutral-500 text-sm">
+          Ask questions about your documents and get voice-powered answers
+        </p>
+      </div>
+
+      {/* Main Content */}
+      <div className="max-w-5xl mx-auto py-4 px-6 sm:px-8">
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Sidebar */}
           <div className="lg:col-span-1 space-y-6">
             {/* Upload */}
-            <Card className="p-4">
+            <Card className="bg-white border-neutral-200 rounded-2xl card-shadow hover-lift p-5">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-medium">Upload Documents</h2>
+                <h2 className="text-sm font-medium text-neutral-900">Upload Documents</h2>
                 {session && (
                   <Badge variant="outline" className="text-xs">
                     {documentsRemaining} left
@@ -206,7 +219,7 @@ Restart
                 disabled={!sessionId || documentsRemaining <= 0}
               />
               {documentsRemaining <= 0 && (
-                <p className="text-xs text-muted-foreground mt-2 text-center">
+                <p className="text-xs text-neutral-400 mt-2 text-center">
                   Document limit reached
                 </p>
               )}
@@ -214,7 +227,7 @@ Restart
 
             {/* Documents */}
             <div>
-              <h2 className="text-sm font-medium mb-3">Your Documents</h2>
+              <h2 className="text-sm font-medium text-neutral-900 mb-3">Your Documents</h2>
               <DocumentList
                 documents={documents}
                 onDelete={handleDeleteDocument}
@@ -222,7 +235,7 @@ Restart
             </div>
 
             {/* Voice Selector */}
-            <Card className="p-4">
+            <Card className="bg-white border-neutral-200 rounded-2xl card-shadow hover-lift p-5">
               <VoiceSelector
                 value={selectedVoice}
                 onChange={setSelectedVoice}
@@ -239,15 +252,15 @@ Restart
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
             {/* Query Input */}
-            <Card className="p-6">
-              <h2 className="text-lg font-semibold mb-4">Ask a Question</h2>
+            <Card className="bg-white border-neutral-200 rounded-2xl card-shadow p-6">
+              <h2 className="text-lg font-semibold text-neutral-900 mb-4">Ask a Question</h2>
               <QueryInput
                 onSubmit={handleQuery}
                 isLoading={queryLoading}
                 disabled={!isReady || queriesRemaining <= 0}
               />
               {!isReady && documents.length === 0 && (
-                <p className="text-sm text-muted-foreground mt-3 text-center">
+                <p className="text-sm text-neutral-400 mt-3 text-center">
                   Upload a PDF to get started
                 </p>
               )}
@@ -268,12 +281,13 @@ Restart
               onPlayAudio={handlePlayAudio}
               onStopAudio={stopAudio}
               onTogglePause={togglePause}
+              audioError={audioError}
             />
           </div>
         </div>
 
         {/* Footer */}
-        <footer className="mt-12 text-center text-sm text-muted-foreground">
+        <footer className="mt-12 text-center text-sm text-neutral-400">
           <p>
             Built with Next.js, FastAPI, and OpenAI
           </p>

@@ -15,6 +15,7 @@ interface QueryResponseProps {
   onPlayAudio: () => void;
   onStopAudio: () => void;
   onTogglePause: () => void;
+  audioError?: string | null;
 }
 
 export function QueryResponseCard({
@@ -26,6 +27,7 @@ export function QueryResponseCard({
   onPlayAudio,
   onStopAudio,
   onTogglePause,
+  audioError,
 }: QueryResponseProps) {
   if (isLoading) {
     return (
@@ -56,6 +58,10 @@ export function QueryResponseCard({
           downloadUrl={response.audio_download_url}
         />
       </div>
+
+      {audioError && (
+        <p className="text-sm text-destructive mt-2">{audioError}</p>
+      )}
 
       <div className="prose prose-sm dark:prose-invert max-w-none">
         <p className="whitespace-pre-wrap">{response.text_response}</p>
