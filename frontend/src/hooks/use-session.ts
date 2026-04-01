@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import type { SessionResponse, SessionDocument } from "@/types/api";
 import { createSession, getSession } from "@/lib/api-client";
 
-const SESSION_KEY = "voice-rag-session-id";
+const SESSION_KEY = "voice-rag-session";
+const SESSION_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour client-side (server is source of truth)
 
 interface UseSessionReturn {
   session: SessionResponse | null;
@@ -19,6 +20,10 @@ interface UseSessionReturn {
   clearSession: () => void;
 }
 
+function saveSession(id: string) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ id, ts: Date.now() }));
+}
+
 export function useSession(): UseSessionReturn {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -29,24 +34,31 @@ export function useSession(): UseSessionReturn {
     setError(null);
 
     try {
-      // Check for existing session in localStorage
-      const storedSessionId = localStorage.getItem(SESSION_KEY);
+      const raw = localStorage.getItem(SESSION_KEY);
+      // Migrate legacy key
+      const legacyId = localStorage.getItem("voice-rag-session-id");
+      if (legacyId) localStorage.removeItem("voice-rag-session-id");
 
-      if (storedSessionId) {
+      if (raw) {
         try {
-          const existingSession = await getSession(storedSessionId);
-          setSession(existingSession);
-          setIsLoading(false);
-          return;
+          const { id, ts } = JSON.parse(raw);
+          if (Date.now() - ts > SESSION_MAX_AGE_MS) {
+            localStorage.removeItem(SESSION_KEY);
+          } else {
+            const existingSession = await getSession(id);
+            saveSession(id); // refresh timestamp on successful load
+            setSession(existingSession);
+            setIsLoading(false);
+            return;
+          }
         } catch {
-          // Session expired or not found, create new one
+          // Session expired on server or parse error — create new silently
           localStorage.removeItem(SESSION_KEY);
         }
       }
 
-      // Create new session
       const newSession = await createSession();
-      localStorage.setItem(SESSION_KEY, newSession.session_id);
+      saveSession(newSession.session_id);
       setSession(newSession);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to initialize session");
@@ -60,9 +72,14 @@ export function useSession(): UseSessionReturn {
 
     try {
       const refreshedSession = await getSession(session.session_id);
+      saveSession(session.session_id); // refresh timestamp
       setSession(refreshedSession);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to refresh session");
+    } catch {
+      // Session expired on server — create new one transparently
+      localStorage.removeItem(SESSION_KEY);
+      const newSession = await createSession();
+      saveSession(newSession.session_id);
+      setSession(newSession);
     }
   }, [session?.session_id]);
 
