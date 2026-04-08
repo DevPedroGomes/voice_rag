@@ -8,6 +8,8 @@ import { useSession } from "@/hooks/use-session";
 import { useDocuments } from "@/hooks/use-documents";
 import { useQuery } from "@/hooks/use-query";
 import { useAudioStream } from "@/hooks/use-audio-stream";
+import { useLocale } from "@/hooks/use-locale";
+import { getTranslations } from "@/lib/i18n";
 import { getQueryHistory } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,19 +25,19 @@ import { FileUp, Cpu, Search, MessageSquare as MsgIcon, Volume2 } from "lucide-r
 
 // ─── Pipeline Section (shown when no documents) ───
 
-function PipelineSection() {
+function PipelineSection({ t }: { t: (key: string, params?: Record<string, string | number>) => string }) {
   const steps = [
-    { icon: FileUp, title: "Upload PDF", desc: "Your document is split into semantic chunks using LangChain text splitters.", color: "bg-blue-50 text-blue-600" },
-    { icon: Cpu, title: "Embed Locally", desc: "Each chunk is embedded using FastEmbed (BAAI/bge-small-en-v1.5) — no external API needed.", color: "bg-purple-50 text-purple-600" },
-    { icon: Search, title: "Vector Search", desc: "Your question is embedded and matched against stored chunks via pgvector cosine similarity.", color: "bg-emerald-50 text-emerald-600" },
-    { icon: MsgIcon, title: "AI Agent", desc: "A Processor Agent (GPT-4.1-mini) synthesizes a grounded answer from the retrieved context.", color: "bg-orange-50 text-orange-600" },
-    { icon: Volume2, title: "Voice Response", desc: "The answer is streamed as speech via GPT-4o-mini-TTS using Server-Sent Events + Web Audio API.", color: "bg-pink-50 text-pink-600" },
+    { icon: FileUp, title: t('pipeline.1.title'), desc: t('pipeline.1.desc'), color: "bg-blue-50 text-blue-600" },
+    { icon: Cpu, title: t('pipeline.2.title'), desc: t('pipeline.2.desc'), color: "bg-purple-50 text-purple-600" },
+    { icon: Search, title: t('pipeline.3.title'), desc: t('pipeline.3.desc'), color: "bg-emerald-50 text-emerald-600" },
+    { icon: MsgIcon, title: t('pipeline.4.title'), desc: t('pipeline.4.desc'), color: "bg-orange-50 text-orange-600" },
+    { icon: Volume2, title: t('pipeline.5.title'), desc: t('pipeline.5.desc'), color: "bg-pink-50 text-pink-600" },
   ];
 
   return (
     <div className="mb-6 animate-fade-in-up">
       <div className="flex items-center gap-3 mb-4">
-        <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest font-mono">How It Works</span>
+        <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest font-mono">{t('pipeline.label')}</span>
         <div className="h-px flex-1 bg-neutral-200" />
       </div>
       <div className="grid gap-3 sm:grid-cols-5">
@@ -53,7 +55,7 @@ function PipelineSection() {
         ))}
       </div>
       <p className="text-[11px] text-neutral-400 font-mono text-center mt-3">
-        FastEmbed (local) · PostgreSQL + pgvector · OpenAI Agents SDK · SSE Audio Streaming
+        {t('pipeline.footer')}
       </p>
     </div>
   );
@@ -187,6 +189,9 @@ export default function Home() {
     togglePause,
   } = useAudioStream();
 
+  const { locale, changeLocale } = useLocale();
+  const t = getTranslations(locale);
+
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>("coral");
   const [queryHistory, setQueryHistory] = useState<QueryRecord[]>([]);
 
@@ -210,7 +215,7 @@ export default function Home() {
     if (sessionId) {
       getQueryHistory(sessionId)
         .then((res) => setQueryHistory(res.queries))
-        .catch(() => { toast.error("Falha ao carregar historico"); });
+        .catch(() => { toast.error(t('toast.historyFailed')); });
     }
   }, [sessionId]);
 
@@ -220,10 +225,10 @@ export default function Home() {
 
       const result = await upload(sessionId, file);
       if (result) {
-        toast.success(`Uploaded ${file.name}`);
+        toast.success(t('toast.uploaded', { name: file.name }));
         await refreshSession();
       } else {
-        toast.error(uploadError || "Upload failed");
+        toast.error(uploadError || t('toast.uploadFailed'));
       }
     },
     [sessionId, upload, refreshSession, uploadError]
@@ -235,10 +240,10 @@ export default function Home() {
 
       const success = await deleteDocument(sessionId, documentId);
       if (success) {
-        toast.success("Document removed");
+        toast.success(t('toast.docRemoved'));
         await refreshSession();
       } else {
-        toast.error("Failed to remove document");
+        toast.error(t('toast.docRemoveFailed'));
       }
     },
     [sessionId, deleteDocument, refreshSession]
@@ -258,7 +263,7 @@ export default function Home() {
           .then((res) => setQueryHistory(res.queries))
           .catch((err) => { console.error("Failed to refresh query history:", err); });
       } else {
-        toast.error(queryError || "Query failed");
+        toast.error(queryError || t('toast.queryFailed'));
       }
     },
     [sessionId, selectedVoice, submit, playAudio, queryError, refreshSession]
@@ -275,7 +280,7 @@ export default function Home() {
     clearSession();
     setStep1Expanded(true);
     setStep2Expanded(false);
-    toast.success("Session restarted");
+    toast.success(t('toast.restarted'));
   }, [stopAudio, clearSession]);
 
   // ─── Loading state ───
@@ -304,6 +309,13 @@ export default function Home() {
   // Busy state: prevent conflicting actions
   const isBusy = isUploading || queryLoading;
 
+  // Step 1 subtitle
+  const step1Subtitle = !hasDocuments
+    ? t('step1.subtitle.empty')
+    : documents.length === 1
+      ? t('step1.subtitle.one')
+      : t('step1.subtitle.many', { count: documents.length });
+
   return (
     <main className="min-h-screen bg-[#fafafa]">
       {/* Header */}
@@ -311,16 +323,39 @@ export default function Home() {
         <div className="max-w-3xl mx-auto px-6 sm:px-8 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <img src="/logo.png" alt="Logo" className="h-8 w-8 rounded-lg object-cover" />
-            <span className="font-semibold tracking-tight text-neutral-900">Voice RAG</span>
+            <span className="font-semibold tracking-tight text-neutral-900">{t('nav.title')}</span>
           </div>
           <div className="flex items-center gap-2">
             {session && (
               <span className="text-xs text-neutral-400 font-mono hidden sm:inline">
-                {queriesRemaining} queries · {documentsRemaining} docs left
+                {queriesRemaining} {t('nav.queries')} · {documentsRemaining} {t('nav.docsLeft')}
               </span>
             )}
+            {/* Language toggle */}
+            <div className="flex items-center text-xs font-mono text-neutral-400 border border-neutral-200 rounded-md overflow-hidden">
+              <button
+                type="button"
+                onClick={() => changeLocale('en')}
+                className={cn(
+                  "px-1.5 py-1 transition-colors",
+                  locale === 'en' ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
+                )}
+              >
+                EN
+              </button>
+              <button
+                type="button"
+                onClick={() => changeLocale('pt')}
+                className={cn(
+                  "px-1.5 py-1 transition-colors",
+                  locale === 'pt' ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
+                )}
+              >
+                PT
+              </button>
+            </div>
             <Button variant="outline" size="sm" onClick={handleRestart} className="text-xs">
-              Restart
+              {t('nav.restart')}
             </Button>
           </div>
         </div>
@@ -334,21 +369,21 @@ export default function Home() {
           <>
             <div className="text-center pb-6 animate-fade-in-up">
               <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">
-                Voice-Powered Document Q&A
+                {t('welcome.title')}
               </h2>
               <p className="text-neutral-500 mt-2 text-sm max-w-md mx-auto">
-                Upload a PDF, choose a voice, and ask questions — get spoken answers grounded in your documents.
+                {t('welcome.subtitle')}
               </p>
             </div>
-            <PipelineSection />
+            <PipelineSection t={t} />
           </>
         )}
 
         {/* Step 1: Upload Documents */}
         <StepCard
           number={1}
-          title="Upload Documents"
-          subtitle={hasDocuments ? `${documents.length} document${documents.length > 1 ? "s" : ""} indexed` : "PDF files up to 50MB"}
+          title={t('step1.title')}
+          subtitle={step1Subtitle}
           status={step1Status}
           expanded={step1Expanded}
           onToggle={() => setStep1Expanded(!step1Expanded)}
@@ -361,7 +396,7 @@ export default function Home() {
               disabled={!sessionId || documentsRemaining <= 0 || queryLoading}
             />
             {documentsRemaining <= 0 && (
-              <p className="text-xs text-neutral-400 text-center">Document limit reached</p>
+              <p className="text-xs text-neutral-400 text-center">{t('step1.limitReached')}</p>
             )}
             {documents.length > 0 && (
               <div className="pt-2">
@@ -374,8 +409,8 @@ export default function Home() {
         {/* Step 2: Select Voice */}
         <StepCard
           number={2}
-          title="Select Voice"
-          subtitle={hasDocuments ? selectedVoice.charAt(0).toUpperCase() + selectedVoice.slice(1) : "Choose how the AI responds"}
+          title={t('step2.title')}
+          subtitle={hasDocuments ? selectedVoice.charAt(0).toUpperCase() + selectedVoice.slice(1) : t('step2.subtitle.locked')}
           status={step2Status}
           expanded={step2Expanded}
           onToggle={hasDocuments ? () => setStep2Expanded(!step2Expanded) : undefined}
@@ -391,8 +426,8 @@ export default function Home() {
         {/* Step 3: Ask a Question */}
         <StepCard
           number={3}
-          title="Ask a Question"
-          subtitle={isReady ? "Type your question and press Enter" : "Complete the steps above first"}
+          title={t('step3.title')}
+          subtitle={isReady ? t('step3.subtitle.ready') : t('step3.subtitle.locked')}
           status={step3Status}
           expanded={isReady}
         >
@@ -404,7 +439,7 @@ export default function Home() {
             />
             {queriesRemaining <= 0 && (
               <p className="text-sm text-destructive text-center">
-                Query limit reached. Restart to create a new session.
+                {t('step3.queryLimit')}
               </p>
             )}
           </div>
@@ -436,7 +471,7 @@ export default function Home() {
 
         {/* Footer */}
         <footer className="pt-8 pb-4 text-center text-sm text-neutral-400">
-          Built with Next.js, FastAPI, and OpenAI
+          {t('footer')}
         </footer>
       </div>
     </main>
