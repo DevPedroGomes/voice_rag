@@ -436,6 +436,7 @@ export default function Home() {
               onSubmit={handleQuery}
               isLoading={queryLoading}
               disabled={!isReady || queriesRemaining <= 0 || isUploading}
+              sessionId={sessionId}
             />
             {queriesRemaining <= 0 && (
               <p className="text-sm text-destructive text-center">

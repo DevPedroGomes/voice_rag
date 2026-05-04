@@ -108,3 +108,10 @@ export interface AudioChunkEvent {
 export interface AudioCompleteEvent {
   total_chunks: number;
 }
+
+// Sprint 3.1 — Speech-to-Text
+export interface TranscriptionResponse {
+  text: string;
+  language: string | null;
+  duration_ms: number | null;
+}

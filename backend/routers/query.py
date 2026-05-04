@@ -5,7 +5,7 @@ import os
 import time
 import uuid
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse, FileResponse
@@ -23,6 +23,8 @@ from services.vector_service import VectorService, get_vector_service
 from services.embedding_service import EmbeddingService, get_embedding_service
 from services.agent_service import AgentService, get_agent_service
 from services.audio_service import AudioService, get_audio_service
+from services.grader import grade_documents
+from services.reranker import rerank_documents
 
 logger = logging.getLogger(__name__)
 
@@ -70,24 +72,43 @@ async def submit_query(
     if not session.is_ready:
         raise HTTPException(status_code=400, detail="No documents uploaded yet")
 
-    # Enforce query limit
+    # Enforce query limit (Onda 3 — query_count is the persisted source of truth)
     settings = get_settings()
-    if len(session.queries) >= settings.max_queries_per_session:
+    if session.query_count >= settings.max_queries_per_session:
         raise HTTPException(
             status_code=429,
             detail=f"Query limit reached ({settings.max_queries_per_session} per session). Restart to create a new session.",
         )
 
     try:
-        # Generate query embedding (async to not block event loop)
+        # Generate query embedding (cached when possible, non-blocking).
         query_embedding = await embedding_service.embed_single(body.query)
 
-        # Search for relevant documents in PostgreSQL
-        search_results = await vector_service.search(
-            session_id=session_id,
-            query_embedding=query_embedding,
-            limit=3,
-        )
+        # Sprint 1: Hybrid retrieval (semantic + keyword via RRF).
+        # When the reranker is enabled (Sprint 2), we want a *wider* candidate
+        # pool than the final top_k so the cross-encoder has room to promote
+        # initially low-ranked but actually-relevant chunks. Without reranker,
+        # we ask for exactly top_k.
+        if settings.enable_hybrid_search:
+            retrieval_limit = (
+                settings.search_top_k * settings.search_candidates_multiplier
+                if settings.enable_reranker
+                else settings.search_top_k
+            )
+            search_results = await vector_service.search_hybrid(
+                session_id=session_id,
+                query_text=body.query,
+                query_embedding=query_embedding,
+                limit=retrieval_limit,
+                candidates_multiplier=1,  # already inflated above
+                rrf_k=settings.rrf_k,
+            )
+        else:
+            search_results = await vector_service.search(
+                session_id=session_id,
+                query_embedding=query_embedding,
+                limit=settings.search_top_k,
+            )
 
         if not search_results:
             raise HTTPException(
@@ -95,10 +116,50 @@ async def submit_query(
                 detail="No relevant documents found. Please upload documents first.",
             )
 
+        # Sprint 2.1: Cross-encoder reranking. Cohere rescores (query, doc)
+        # pairs in a single batched call (~150ms) and overwrites `score` with
+        # a calibrated [0,1] relevance value. Falls back to RRF order when
+        # the API key is missing or the call fails.
+        if settings.enable_reranker:
+            search_results = await rerank_documents(
+                query=body.query,
+                documents=search_results,
+                top_n=settings.search_top_k,
+                model=settings.cohere_rerank_model,
+                api_key=settings.cohere_api_key,
+            )
+
+        # Threshold grading with safety net. With the reranker active, scores
+        # are Cohere relevance values in [0,1], so the threshold should be
+        # interpreted on that scale (see config.relevance_threshold_reranked).
+        # Without reranker, scores are RRF (much smaller); the legacy threshold
+        # applies. Pick the right one based on the active pipeline.
+        threshold = (
+            settings.relevance_threshold_reranked
+            if settings.enable_reranker
+            else settings.relevance_threshold
+        )
+        graded_results, low_confidence = grade_documents(
+            documents=search_results,
+            threshold=threshold,
+        )
+
+        if low_confidence:
+            logger.info(
+                "query %s: low_confidence=True (graded %d/%d above threshold %.3f, "
+                "reranked=%s)",
+                session_id,
+                len(graded_results),
+                len(search_results),
+                threshold,
+                settings.enable_reranker,
+            )
+
         # Process query with agents
         text_response, voice_instructions, sources = await agent_service.process_query(
             query=body.query,
-            context=search_results,
+            context=graded_results,
+            low_confidence=low_confidence,
         )
 
         # Generate query ID
@@ -122,23 +183,23 @@ async def submit_query(
             "created_at": time.time(),
         }
 
-        # Build source info
+        # Build source info from graded results (only the docs the agent saw).
         source_infos = []
-        for result in search_results:
+        for result in graded_results:
             source_infos.append(SourceInfo(
                 file_name=result.get("file_name", "Unknown"),
                 page_number=result.get("page_number"),
                 snippet=result.get("content", "")[:200] + "...",
             ))
 
-        # Save query to session history
+        # Save query to session history (bumps persisted query_count)
         query_record = QueryRecord(
             query_id=query_id,
             question=body.query,
             response=text_response,
             voice=body.voice,
             sources=sources,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
         await session_store.add_query(session_id, query_record)
 
@@ -152,8 +213,10 @@ async def submit_query(
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
+    except Exception:
+        # Onda 3 — never leak internal error details to clients.
+        logger.exception("Error processing query for session %s", session_id)
+        raise HTTPException(status_code=500, detail="Error processing query")
 
 
 @router.get("/queries", response_model=QueryHistoryResponse)
@@ -203,9 +266,10 @@ async def stream_audio(
                 chunk_index += 1
 
             yield f"event: audio_complete\ndata: {json.dumps({'total_chunks': chunk_index})}\n\n"
-        except Exception as e:
-            logger.error(f"Error streaming audio for query {query_id}: {e}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        except Exception:
+            # Onda 3 — never echo raw exception payload to SSE clients.
+            logger.exception(f"Error streaming audio for query {query_id}")
+            yield f"event: error\ndata: {json.dumps({'error': 'stream_failed'})}\n\n"
         finally:
             # Clean up query result after streaming completes
             _remove_query_result(query_id)
@@ -274,6 +338,7 @@ async def download_audio(
             media_type="audio/mpeg",
             filename=f"response_{query_id}.mp3",
         )
-    except Exception as e:
-        logger.error(f"Error generating audio for query {query_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
+    except Exception:
+        # Onda 3 — generic external error message; details only in server log.
+        logger.exception(f"Error generating audio for query {query_id}")
+        raise HTTPException(status_code=500, detail="Error generating audio")

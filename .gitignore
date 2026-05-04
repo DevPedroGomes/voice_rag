@@ -12,6 +12,11 @@ Thumbs.db
 .env
 .env.local
 .env*.local
+.env.backup*
+
+# Local docs / scratchpads — only README.md is published
+*.md
+!README.md
 
 # Logs
 *.log

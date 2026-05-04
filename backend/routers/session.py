@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 
 from config import get_settings
 from models.schemas import (
@@ -8,7 +8,11 @@ from models.schemas import (
     VoicesResponse,
     HealthResponse,
 )
-from services.session_service import SessionStore, get_session_store
+from services.session_service import (
+    SessionStore,
+    SessionRateLimitError,
+    get_session_store,
+)
 from services.vector_service import VectorService, get_vector_service
 
 router = APIRouter(prefix="/api", tags=["session"])
@@ -31,16 +35,31 @@ AVAILABLE_VOICES: list[VoiceOption] = [
 ]
 
 
+def _client_ip(request: Request) -> str:
+    """Extract the originating client IP. Trusts X-Forwarded-For from
+    Traefik (which is the only ingress in this deployment).
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/session", response_model=SessionResponse)
 async def create_session(
+    request: Request,
     body: SessionCreate | None = None,
     session_store: SessionStore = Depends(get_session_store),
 ):
     """Create a new user session."""
     client_id = body.client_id if body else None
+    creator_ip = _client_ip(request)
     try:
-        session = await session_store.create(client_id=client_id)
-    except ValueError as e:
+        session = await session_store.create(
+            client_id=client_id,
+            creator_ip=creator_ip,
+        )
+    except SessionRateLimitError as e:
         raise HTTPException(status_code=429, detail=str(e))
 
     settings = get_settings()
@@ -50,9 +69,10 @@ async def create_session(
         expires_at=session.expires_at,
         documents=session.documents,
         is_ready=session.is_ready,
-        query_count=len(session.queries),
-        queries_remaining=settings.max_queries_per_session - len(session.queries),
+        query_count=session.query_count,
+        queries_remaining=settings.max_queries_per_session - session.query_count,
         documents_remaining=settings.max_documents_per_session - len(session.documents),
+        transcribes_remaining=settings.max_transcribes_per_session - session.transcribe_count,
     )
 
 
@@ -73,9 +93,10 @@ async def get_session(
         expires_at=session.expires_at,
         documents=session.documents,
         is_ready=session.is_ready,
-        query_count=len(session.queries),
-        queries_remaining=settings.max_queries_per_session - len(session.queries),
+        query_count=session.query_count,
+        queries_remaining=settings.max_queries_per_session - session.query_count,
         documents_remaining=settings.max_documents_per_session - len(session.documents),
+        transcribes_remaining=settings.max_transcribes_per_session - session.transcribe_count,
     )
 
 

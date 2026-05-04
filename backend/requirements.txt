@@ -8,6 +8,8 @@ openai-agents>=0.0.10
 asyncpg==0.30.0
 pgvector==0.3.6
 fastembed==0.4.2
-langchain-text-splitters==0.3.4
 langchain-community==0.3.14
 pypdf==5.1.0
+# Sprint 2.1 — Cohere cross-encoder reranker (optional: gracefully degrades
+# to RRF order when COHERE_API_KEY is missing or the package is absent).
+cohere>=5.13.0

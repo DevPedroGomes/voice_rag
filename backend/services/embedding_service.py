@@ -38,14 +38,38 @@ class EmbeddingService:
         """
         Generate embedding for a single text (async, non-blocking).
 
+        Uses an in-memory LRU+TTL cache to avoid recomputing embeddings for
+        repeated queries within the cache's lifetime. Cache lookup is O(1)
+        and bypasses both the lock-protected ONNX runtime and the
+        asyncio.to_thread context switch.
+
         Args:
             text: Text string to embed
 
         Returns:
             Embedding vector
         """
+        # Lazy import to avoid circular dependency at module load time and
+        # to keep this method usable in environments where settings aren't
+        # fully wired (e.g., unit tests).
+        from config import get_settings
+        from services.embedding_cache import get_embedding_cache
+
+        settings = get_settings()
+        cache = get_embedding_cache() if settings.enable_embedding_cache else None
+
+        if cache is not None:
+            cached = await cache.get(text)
+            if cached is not None:
+                return cached
+
         embeddings = await self.embed([text])
-        return embeddings[0]
+        result = embeddings[0]
+
+        if cache is not None:
+            await cache.set(text, result)
+
+        return result
 
 
 # Singleton instance

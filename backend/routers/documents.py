@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 
@@ -85,7 +85,7 @@ async def upload_document(
         )
 
         # Add document to session
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         doc = SessionDocument(
             document_id=document_id,
             file_name=file.filename,
@@ -106,8 +106,10 @@ async def upload_document(
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing document: {str(e)}")
+    except Exception:
+        # Onda 3 — generic message; the stack trace stays in the server log.
+        logger.exception("Error processing document for session %s", session_id)
+        raise HTTPException(status_code=500, detail="Error processing document")
 
 
 @router.get("/documents", response_model=DocumentListResponse)

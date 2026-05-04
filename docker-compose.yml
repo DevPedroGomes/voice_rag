@@ -38,6 +38,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       CORS_ORIGINS: '["https://voicerag.pgdev.com.br"]'
+      # RAG processor LLM via OpenRouter (TTS/Whisper continuam OpenAI direto).
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-deepseek/deepseek-chat}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s
@@ -53,7 +57,7 @@ services:
       - "traefik.http.routers.voicerag-api.rule=Host(`voicerag-api.pgdev.com.br`)"
       - "traefik.http.routers.voicerag-api.tls=true"
       - "traefik.http.routers.voicerag-api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.voicerag-api.middlewares=voicerag-api-security@docker"
+      - "traefik.http.routers.voicerag-api.middlewares=voicerag-api-security@docker,global-ratelimit@file,strip-server-header@file"
       - "traefik.http.services.voicerag-api.loadbalancer.server.port=8000"
       # Security Headers
       - "traefik.http.middlewares.voicerag-api-security.headers.stsSeconds=31536000"
@@ -94,7 +98,7 @@ services:
       - "traefik.http.routers.voicerag.rule=Host(`voicerag.pgdev.com.br`)"
       - "traefik.http.routers.voicerag.tls=true"
       - "traefik.http.routers.voicerag.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.voicerag.middlewares=voicerag-security@docker"
+      - "traefik.http.routers.voicerag.middlewares=voicerag-security@docker,global-ratelimit@file,strip-server-header@file"
       - "traefik.http.services.voicerag.loadbalancer.server.port=3000"
       # Security Headers
       - "traefik.http.middlewares.voicerag-security.headers.stsSeconds=31536000"

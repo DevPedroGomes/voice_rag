@@ -29,6 +29,12 @@ class Session(BaseModel):
     last_activity: datetime
     documents: list[SessionDocument] = Field(default_factory=list)
     queries: list[QueryRecord] = Field(default_factory=list)
+    # Onda 3 — counters persisted in Postgres (see services/session_service.py).
+    # `queries` list is not persisted across restarts, so query_count is the
+    # source of truth for quota enforcement.
+    transcribe_count: int = 0
+    query_count: int = 0
+    creator_ip: str | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -65,6 +71,7 @@ class SessionResponse(BaseModel):
     query_count: int = 0
     queries_remaining: int = 5
     documents_remaining: int = 3
+    transcribes_remaining: int = 15
 
 
 class DocumentUploadResponse(BaseModel):
@@ -111,3 +118,17 @@ class VoicesResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["healthy", "unhealthy"]
     database_connected: bool
+
+
+# ============ Sprint 3.1 — STT ============
+
+class TranscriptionResponse(BaseModel):
+    """Response from POST /api/session/{id}/transcribe.
+
+    `text` is the recognized utterance, ready to be passed back into
+    /query as `body.query`. `language` is Whisper's detected ISO-639-1
+    code (None when a language hint was supplied).
+    """
+    text: str
+    language: str | None = None
+    duration_ms: int | None = None

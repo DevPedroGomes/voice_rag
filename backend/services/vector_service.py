@@ -31,12 +31,16 @@ class VectorService:
         await register_vector(conn)
 
     async def _ensure_schema(self) -> None:
-        """Create the embeddings table if it doesn't exist."""
+        """Create the embeddings table and indexes if they don't exist.
+
+        Idempotent: safe to run on every startup. Adds new columns/indexes
+        without dropping existing data. Migrates IVFFlat → HNSW transparently.
+        """
         async with self._pool.acquire() as conn:
             # Enable pgvector extension
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-            # Create embeddings table
+            # Create embeddings table (base schema)
             await conn.execute(f"""
                 CREATE TABLE IF NOT EXISTS embeddings (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -50,7 +54,18 @@ class VectorService:
                 )
             """)
 
-            # Create indexes for efficient querying
+            # Sprint 1.1 - Hybrid Search: add tsvector column for keyword search
+            # GENERATED column auto-updates with content. 'simple' dict is
+            # language-agnostic (works for pt-BR + en without aggressive stemming).
+            await conn.execute("""
+                ALTER TABLE embeddings
+                ADD COLUMN IF NOT EXISTS search_vector tsvector
+                GENERATED ALWAYS AS (
+                    to_tsvector('simple', coalesce(content, ''))
+                ) STORED
+            """)
+
+            # Session/document filters
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_embeddings_session_id
                 ON embeddings(session_id)
@@ -61,17 +76,21 @@ class VectorService:
                 ON embeddings(document_id)
             """)
 
-            # Create vector index for similarity search (IVFFlat)
-            # Only create if table has data, otherwise use exact search
-            try:
-                await conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_embeddings_vector
-                    ON embeddings USING ivfflat (embedding vector_cosine_ops)
-                    WITH (lists = 100)
-                """)
-            except asyncpg.exceptions.InvalidParameterValueError:
-                # IVFFlat requires data to build, will be created later
-                logger.info("IVFFlat index will be created when data is added")
+            # Sprint 1.1 - GIN index for keyword search (BM25-like via ts_rank)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_embeddings_search_vector
+                ON embeddings USING GIN(search_vector)
+            """)
+
+            # Sprint 1.1 - HNSW index for semantic search
+            # Replaces previous IVFFlat (better recall, no need to rebuild after inserts).
+            # Drop the old IVFFlat index if it exists (one-time migration).
+            await conn.execute("DROP INDEX IF EXISTS idx_embeddings_vector")
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw
+                ON embeddings USING hnsw (embedding vector_cosine_ops)
+                WITH (m = 16, ef_construction = 64)
+            """)
 
     async def store_embeddings(
         self,
@@ -163,6 +182,111 @@ class VectorService:
                 "page_number": row["page_number"],
                 "document_id": row["document_id"],
                 "score": float(row["score"]) if row["score"] else 0.0,
+            }
+            for row in rows
+        ]
+
+    async def search_hybrid(
+        self,
+        session_id: str,
+        query_text: str,
+        query_embedding: list[float],
+        limit: int = 5,
+        candidates_multiplier: int = 3,
+        rrf_k: int = 60,
+    ) -> list[dict[str, Any]]:
+        """Hybrid search combining semantic (HNSW cosine) + keyword (GIN tsvector)
+        rankings via Reciprocal Rank Fusion.
+
+        Args:
+            session_id: Session identifier for isolation.
+            query_text: Original query string (used for tsquery).
+            query_embedding: Query vector for semantic search.
+            limit: Final number of results to return.
+            candidates_multiplier: Each ranker fetches limit*multiplier candidates
+                before fusion (gives reranker headroom downstream).
+            rrf_k: RRF constant (60 is the standard from Cormack et al. 2009).
+
+        Returns:
+            List of dicts ordered by RRF score, each with content/file_name/
+            page_number/document_id/score (RRF) and rank metadata.
+        """
+        prefetch = max(limit * candidates_multiplier, limit)
+
+        async with self._pool.acquire() as conn:
+            # Two parallel rankings in a single round-trip via CTEs.
+            # plainto_tsquery is permissive (no special syntax errors).
+            rows = await conn.fetch(
+                """
+                WITH semantic AS (
+                    SELECT
+                        id,
+                        content,
+                        file_name,
+                        page_number,
+                        document_id,
+                        ROW_NUMBER() OVER (ORDER BY embedding <=> $1::vector) AS rank,
+                        1 - (embedding <=> $1::vector) AS sem_score
+                    FROM embeddings
+                    WHERE session_id = $2
+                    ORDER BY embedding <=> $1::vector
+                    LIMIT $3
+                ),
+                keyword AS (
+                    SELECT
+                        id,
+                        content,
+                        file_name,
+                        page_number,
+                        document_id,
+                        ROW_NUMBER() OVER (
+                            ORDER BY ts_rank_cd(search_vector, plainto_tsquery('simple', $4)) DESC
+                        ) AS rank,
+                        ts_rank_cd(search_vector, plainto_tsquery('simple', $4)) AS kw_score
+                    FROM embeddings
+                    WHERE session_id = $2
+                      AND search_vector @@ plainto_tsquery('simple', $4)
+                    ORDER BY ts_rank_cd(search_vector, plainto_tsquery('simple', $4)) DESC
+                    LIMIT $3
+                ),
+                fused AS (
+                    SELECT
+                        COALESCE(s.id, k.id) AS id,
+                        COALESCE(s.content, k.content) AS content,
+                        COALESCE(s.file_name, k.file_name) AS file_name,
+                        COALESCE(s.page_number, k.page_number) AS page_number,
+                        COALESCE(s.document_id, k.document_id) AS document_id,
+                        COALESCE(1.0 / ($5 + s.rank), 0.0)
+                            + COALESCE(1.0 / ($5 + k.rank), 0.0) AS rrf_score,
+                        s.sem_score,
+                        k.kw_score
+                    FROM semantic s
+                    FULL OUTER JOIN keyword k ON s.id = k.id
+                )
+                SELECT *
+                FROM fused
+                ORDER BY rrf_score DESC
+                LIMIT $6
+                """,
+                query_embedding,
+                session_id,
+                prefetch,
+                query_text,
+                rrf_k,
+                limit,
+            )
+
+        return [
+            {
+                "content": row["content"],
+                "file_name": row["file_name"],
+                "page_number": row["page_number"],
+                "document_id": row["document_id"],
+                # Primary score = RRF (used by grader). Keep raw signals for
+                # debugging / future reranker integration.
+                "score": float(row["rrf_score"]) if row["rrf_score"] else 0.0,
+                "semantic_score": float(row["sem_score"]) if row["sem_score"] else 0.0,
+                "keyword_score": float(row["kw_score"]) if row["kw_score"] else 0.0,
             }
             for row in rows
         ]
