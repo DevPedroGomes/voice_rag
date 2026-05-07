@@ -14,6 +14,7 @@ from config import get_settings
 from services.session_service import SessionStore, get_session_store
 from services.vector_service import VectorService, get_vector_service
 from services.embedding_service import EmbeddingService, get_embedding_service
+from services.contextual_enrichment import enrich_chunks
 from utils.pdf_processor import process_pdf
 
 logger = logging.getLogger(__name__)
@@ -64,13 +65,33 @@ async def upload_document(
             raise HTTPException(status_code=400, detail="File content does not match PDF format")
 
         # Process PDF (run in thread to avoid blocking event loop)
-        chunks, page_count = await asyncio.to_thread(process_pdf, content, file.filename)
+        chunks, page_count, full_text = await asyncio.to_thread(
+            process_pdf, content, file.filename
+        )
 
         if not chunks:
             raise HTTPException(status_code=400, detail="No content extracted from PDF")
 
         # Generate document ID
         document_id = str(uuid.uuid4())
+
+        # Sprint 4: Contextual Retrieval — prepend 2-3 sentences of
+        # document-level context to each chunk before embedding. Uses Claude
+        # Haiku with prompt caching (first call pays full price, chunks 2..N
+        # pay ~10% on the cached document tokens). Async + bounded
+        # concurrency keeps ingest latency in check.
+        # Falls back to raw chunks when ANTHROPIC_API_KEY is missing or any
+        # call fails — never blocks ingest.
+        if settings.enable_contextual_retrieval:
+            chunks = await enrich_chunks(
+                chunks=chunks,
+                full_document_text=full_text,
+                document_title=file.filename,
+                api_key=settings.anthropic_api_key,
+                model=settings.contextual_model,
+                max_doc_chars=settings.contextual_max_doc_chars,
+                concurrency=settings.contextual_max_chunks_concurrent,
+            )
 
         # Generate embeddings (async to not block event loop)
         texts = [chunk["content"] for chunk in chunks]

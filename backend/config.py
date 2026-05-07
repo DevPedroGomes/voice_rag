@@ -108,6 +108,45 @@ class Settings(BaseSettings):
     chunk_size_tokens: int = 400
     chunk_overlap_tokens: int = 80
 
+    # ── Sprint 5: Multi-query expansion ─────────────────────────────────────
+    # Generate N alternative phrasings of the user query via Claude Haiku,
+    # then run hybrid retrieval against each variant in parallel and merge
+    # by chunk id (best score wins) before reranking. Improves recall on
+    # terse voice queries — the spoken phrasing rarely matches document
+    # vocabulary, and variants bridge that gap.
+    #
+    # Latency posture: the LLM call (~300-500ms) runs concurrently with the
+    # original query's embedding; the N extra hybrid searches run in
+    # parallel via asyncio.gather. Net wall-clock add ≈ 200-400ms.
+    #
+    # Falls back to original-query-only when ANTHROPIC_API_KEY is missing.
+    enable_multi_query: bool = True
+    multi_query_count: int = 3
+    # Cap on the expansion LLM response. ≈ 150 words = plenty for 3-4 variants.
+    multi_query_max_tokens: int = 200
+
+    # ── Sprint 4: Contextual Retrieval (Anthropic, 2024) ────────────────────
+    # Pre-pend 2-3 sentences of document-level context to each chunk *before*
+    # embedding. Implemented via Claude Haiku with prompt caching: the
+    # document is sent with `cache_control=ephemeral` on the first call, so
+    # chunks 2..N pay ~90% less on those input tokens.
+    #
+    # Anthropic measured +35% recall over plain BM25, +49% combined with
+    # hybrid search, +67% with reranker on top — exactly the stack we run.
+    # https://www.anthropic.com/news/contextual-retrieval
+    #
+    # Falls back gracefully to raw chunks when ANTHROPIC_API_KEY is missing.
+    enable_contextual_retrieval: bool = True
+    anthropic_api_key: str | None = None
+    contextual_model: str = "claude-haiku-4-5"
+    # Document text is truncated to this length before being sent as context
+    # — bounds cost on huge PDFs while still giving the LLM enough surface
+    # to situate any chunk. ~50K chars ≈ 12K tokens, well under Haiku's window.
+    contextual_max_doc_chars: int = 50_000
+    # Max concurrent enrichment calls. 5 keeps a 20-chunk PDF under ~3s of
+    # ingest latency p50 (Haiku is ~500-700ms per call).
+    contextual_max_chunks_concurrent: int = 5
+
     # ── Sprint 3: Voice loop closure ────────────────────────────────────────
     # Speech-to-Text via OpenAI Whisper. When False, the /transcribe endpoint
     # returns 503 — useful for cost control or to disable the mic button

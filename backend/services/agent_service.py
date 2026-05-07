@@ -1,8 +1,10 @@
 import logging
 import os
+from typing import AsyncGenerator
 
 from agents import Agent, Runner, set_tracing_disabled
 from agents.model_settings import ModelSettings
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +128,27 @@ class AgentService:
             model_settings=ModelSettings(max_tokens=max_response_tokens),
         )
 
+        # Sprint 6 — streaming path. The Agents SDK's Runner.run_streamed
+        # surface is awkward to plumb into our SSE handler (event types
+        # vary across versions, and we don't need handoffs/multi-tool
+        # behavior here). Bypass the agent abstraction and stream from
+        # the underlying chat completions endpoint directly. Same prompt,
+        # same max_tokens, same provider routing.
+        provider = (llm_provider or "openai").lower()
+        if provider == "openrouter":
+            self._stream_client = AsyncOpenAI(
+                api_key=openrouter_api_key,
+                base_url=openrouter_base_url,
+                default_headers={
+                    "HTTP-Referer": "https://voicerag.pgdev.com.br",
+                    "X-Title": "qa-pgdev voice_rag",
+                },
+            )
+        else:
+            self._stream_client = AsyncOpenAI(api_key=openai_api_key)
+        self._stream_model = processor_model
+        self._max_response_tokens = max_response_tokens
+
     @staticmethod
     def _sanitize_source(source: str) -> str:
         """Strip angle brackets from filenames so they can't break the
@@ -193,6 +216,89 @@ class AgentService:
 
         parts.append(f"\n<user_question>{query}</user_question>\n")
         return "".join(parts), sources
+
+    @classmethod
+    def _build_user_message(
+        cls,
+        query: str,
+        context: list[dict],
+        low_confidence: bool,
+    ) -> tuple[str, list[str]]:
+        """Build the user-turn content for streaming. Mirrors process_query's
+        body assembly so the streaming and non-streaming paths produce
+        equivalent prompts."""
+        context_str, sources = cls._build_context_string(query, context)
+        if low_confidence:
+            context_str += (
+                "\nIMPORTANT: The retrieved context has LOW confidence and may "
+                "not contain a clear answer. In ONE short sentence, acknowledge "
+                "the uncertainty (e.g., 'I'm not entirely sure based on the "
+                "documents, but...'). Do not invent facts."
+            )
+        else:
+            context_str += (
+                "\nReply in 2-4 short sentences, optimized for speech."
+            )
+        return context_str, sources
+
+    async def stream_response(
+        self,
+        query: str,
+        context: list[dict],
+        low_confidence: bool = False,
+    ) -> AsyncGenerator[str, None]:
+        """Stream the assistant's text response token-by-token.
+
+        Bypasses the Agents SDK Runner — uses AsyncOpenAI's chat
+        completions directly with `stream=True`. Honors the same
+        VOICE_INSTRUCTIONS system prompt and max_tokens cap as the
+        non-streaming path so output quality is equivalent.
+
+        Yields:
+            Text deltas (strings). Empty deltas (e.g., role-only chunks)
+            are filtered out — the consumer only sees user-visible text.
+
+        Caller responsibilities:
+            - Call _build_user_message() first to get the user content
+              and source list for citation.
+            - Concatenate deltas if you need the full text at the end.
+            - Handle partial sentences if pipelining to TTS — see
+              services/sentence_buffer.py.
+        """
+        user_content, _sources = self._build_user_message(
+            query=query, context=context, low_confidence=low_confidence
+        )
+
+        stream = await self._stream_client.chat.completions.create(
+            model=self._stream_model,
+            messages=[
+                {"role": "system", "content": VOICE_INSTRUCTIONS},
+                {"role": "user", "content": user_content},
+            ],
+            max_tokens=self._max_response_tokens,
+            stream=True,
+        )
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            text = getattr(delta, "content", None)
+            if text:
+                yield text
+
+    def get_sources_for_query(
+        self,
+        query: str,
+        context: list[dict],
+        low_confidence: bool = False,
+    ) -> list[str]:
+        """Return the deduplicated source filenames the streaming response
+        will cite — useful when emitting an SSE `sources` event before the
+        first text delta arrives."""
+        _user_content, sources = self._build_user_message(
+            query=query, context=context, low_confidence=low_confidence
+        )
+        return sources
 
     async def process_query(
         self,

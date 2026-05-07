@@ -278,6 +278,9 @@ class VectorService:
 
         return [
             {
+                # Sprint 5: include chunk id so multi-query callers can merge
+                # results across query variants (best score per id).
+                "id": str(row["id"]),
                 "content": row["content"],
                 "file_name": row["file_name"],
                 "page_number": row["page_number"],

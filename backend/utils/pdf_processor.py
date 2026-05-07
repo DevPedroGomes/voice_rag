@@ -107,7 +107,7 @@ def process_pdf(
     file_name: str,
     chunk_size: int = 400,
     chunk_overlap: int = 80,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, str]:
     """
     Process a PDF file and split into chunks with metadata.
 
@@ -116,6 +116,10 @@ def process_pdf(
     signature is preserved for backwards compatibility — `chunk_size` /
     `chunk_overlap` are now interpreted as *token* counts, not characters.
 
+    Sprint 4 (Contextual Retrieval): also returns the full document text
+    (concatenation of pages, separated by blank lines) so the caller can
+    feed it to the contextual enrichment pass before embedding.
+
     Args:
         file_content: PDF file content as bytes.
         file_name: Original file name.
@@ -123,8 +127,10 @@ def process_pdf(
         chunk_overlap: Tokens of sentence overlap between adjacent chunks.
 
     Returns:
-        Tuple of (list of chunks with metadata, page count). Each chunk dict
-        has content/file_name/page_number.
+        Tuple of (chunks, page_count, full_text):
+        - chunks: list of chunk dicts (content / file_name / page_number).
+        - page_count: number of pages in the PDF.
+        - full_text: concatenated page text, used by contextual enrichment.
     """
     tmp_file_path = None
     try:
@@ -143,9 +149,12 @@ def process_pdf(
         page_count = len(pages)
 
         result: list[dict[str, Any]] = []
+        page_texts: list[str] = []
         for page_doc in pages:
-            page_text = page_doc.page_content
+            page_text = page_doc.page_content or ""
             page_num = page_doc.metadata.get("page", None)
+            if page_text.strip():
+                page_texts.append(page_text)
 
             page_chunks = semantic_chunk_text(
                 page_text,
@@ -160,7 +169,8 @@ def process_pdf(
                     "page_number": page_num,
                 })
 
-        return result, page_count
+        full_text = "\n\n".join(page_texts)
+        return result, page_count, full_text
 
     finally:
         # Always cleanup temporary file

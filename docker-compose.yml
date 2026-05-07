@@ -42,6 +42,12 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       LLM_MODEL: ${LLM_MODEL:-deepseek/deepseek-chat}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Cross-encoder reranker (Sprint 2). Optional — falls back to RRF order.
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      # Contextual Retrieval enrichment (Sprint 4). Optional — ingest gracefully
+      # embeds chunks raw when missing.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ENABLE_CONTEXTUAL_RETRIEVAL: ${ENABLE_CONTEXTUAL_RETRIEVAL:-true}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s

@@ -21,10 +21,12 @@ from config import get_settings
 from services.session_service import SessionStore, get_session_store
 from services.vector_service import VectorService, get_vector_service
 from services.embedding_service import EmbeddingService, get_embedding_service
-from services.agent_service import AgentService, get_agent_service
+from services.agent_service import AgentService, DEFAULT_TTS_INSTRUCTIONS, get_agent_service
 from services.audio_service import AudioService, get_audio_service
 from services.grader import grade_documents
 from services.reranker import rerank_documents
+from services.query_expansion import expand_query
+from services.sentence_buffer import split_complete_sentences, flush_remainder
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,126 @@ def _remove_query_result(query_id: str) -> None:
     _query_results.pop(query_id, None)
 
 
+async def _retrieve_and_grade(
+    *,
+    session_id: str,
+    query: str,
+    settings,
+    vector_service: VectorService,
+    embedding_service: EmbeddingService,
+) -> tuple[list[dict], bool]:
+    """Run the full retrieval pipeline (multi-query → hybrid → rerank → grade).
+
+    Shared by /query (sync) and /query/stream (SSE). Returns the graded
+    chunks the LLM will see plus the low_confidence flag.
+
+    Raises:
+        HTTPException(404) when no results survive retrieval.
+    """
+    retrieval_limit = (
+        settings.search_top_k * settings.search_candidates_multiplier
+        if settings.enable_reranker
+        else settings.search_top_k
+    )
+
+    # Multi-query expansion in parallel with the original embedding.
+    original_embed_task = asyncio.create_task(
+        embedding_service.embed_single(query)
+    )
+    if settings.enable_multi_query:
+        expansion_task = asyncio.create_task(
+            expand_query(
+                query,
+                api_key=settings.anthropic_api_key,
+                model=settings.contextual_model,
+                count=settings.multi_query_count,
+                max_tokens=settings.multi_query_max_tokens,
+            )
+        )
+    else:
+        expansion_task = None
+
+    query_embedding = await original_embed_task
+    variants = await expansion_task if expansion_task is not None else []
+    all_queries = [query] + variants
+
+    if variants:
+        variant_embeddings = await asyncio.gather(
+            *[embedding_service.embed_single(v) for v in variants]
+        )
+        all_embeddings = [query_embedding] + list(variant_embeddings)
+    else:
+        all_embeddings = [query_embedding]
+
+    if settings.enable_hybrid_search:
+        results_per_query = await asyncio.gather(*[
+            vector_service.search_hybrid(
+                session_id=session_id,
+                query_text=q,
+                query_embedding=emb,
+                limit=retrieval_limit,
+                candidates_multiplier=1,
+                rrf_k=settings.rrf_k,
+            )
+            for q, emb in zip(all_queries, all_embeddings)
+        ])
+        merged: dict[str, dict] = {}
+        for results in results_per_query:
+            for r in results:
+                rid = r.get("id")
+                if rid is None:
+                    continue
+                if rid not in merged or r.get("score", 0.0) > merged[rid].get("score", 0.0):
+                    merged[rid] = r
+        search_results = sorted(
+            merged.values(), key=lambda x: x.get("score", 0.0), reverse=True
+        )[:retrieval_limit]
+    else:
+        search_results = await vector_service.search(
+            session_id=session_id,
+            query_embedding=query_embedding,
+            limit=settings.search_top_k,
+        )
+
+    if not search_results:
+        raise HTTPException(
+            status_code=404,
+            detail="No relevant documents found. Please upload documents first.",
+        )
+
+    if settings.enable_reranker:
+        search_results = await rerank_documents(
+            query=query,
+            documents=search_results,
+            top_n=settings.search_top_k,
+            model=settings.cohere_rerank_model,
+            api_key=settings.cohere_api_key,
+        )
+
+    threshold = (
+        settings.relevance_threshold_reranked
+        if settings.enable_reranker
+        else settings.relevance_threshold
+    )
+    graded_results, low_confidence = grade_documents(
+        documents=search_results,
+        threshold=threshold,
+    )
+
+    if low_confidence:
+        logger.info(
+            "query %s: low_confidence=True (graded %d/%d above threshold %.3f, "
+            "reranked=%s)",
+            session_id,
+            len(graded_results),
+            len(search_results),
+            threshold,
+            settings.enable_reranker,
+        )
+
+    return graded_results, low_confidence
+
+
 @router.post("/query", response_model=QueryResponse)
 async def submit_query(
     session_id: str,
@@ -81,79 +203,13 @@ async def submit_query(
         )
 
     try:
-        # Generate query embedding (cached when possible, non-blocking).
-        query_embedding = await embedding_service.embed_single(body.query)
-
-        # Sprint 1: Hybrid retrieval (semantic + keyword via RRF).
-        # When the reranker is enabled (Sprint 2), we want a *wider* candidate
-        # pool than the final top_k so the cross-encoder has room to promote
-        # initially low-ranked but actually-relevant chunks. Without reranker,
-        # we ask for exactly top_k.
-        if settings.enable_hybrid_search:
-            retrieval_limit = (
-                settings.search_top_k * settings.search_candidates_multiplier
-                if settings.enable_reranker
-                else settings.search_top_k
-            )
-            search_results = await vector_service.search_hybrid(
-                session_id=session_id,
-                query_text=body.query,
-                query_embedding=query_embedding,
-                limit=retrieval_limit,
-                candidates_multiplier=1,  # already inflated above
-                rrf_k=settings.rrf_k,
-            )
-        else:
-            search_results = await vector_service.search(
-                session_id=session_id,
-                query_embedding=query_embedding,
-                limit=settings.search_top_k,
-            )
-
-        if not search_results:
-            raise HTTPException(
-                status_code=404,
-                detail="No relevant documents found. Please upload documents first.",
-            )
-
-        # Sprint 2.1: Cross-encoder reranking. Cohere rescores (query, doc)
-        # pairs in a single batched call (~150ms) and overwrites `score` with
-        # a calibrated [0,1] relevance value. Falls back to RRF order when
-        # the API key is missing or the call fails.
-        if settings.enable_reranker:
-            search_results = await rerank_documents(
-                query=body.query,
-                documents=search_results,
-                top_n=settings.search_top_k,
-                model=settings.cohere_rerank_model,
-                api_key=settings.cohere_api_key,
-            )
-
-        # Threshold grading with safety net. With the reranker active, scores
-        # are Cohere relevance values in [0,1], so the threshold should be
-        # interpreted on that scale (see config.relevance_threshold_reranked).
-        # Without reranker, scores are RRF (much smaller); the legacy threshold
-        # applies. Pick the right one based on the active pipeline.
-        threshold = (
-            settings.relevance_threshold_reranked
-            if settings.enable_reranker
-            else settings.relevance_threshold
+        graded_results, low_confidence = await _retrieve_and_grade(
+            session_id=session_id,
+            query=body.query,
+            settings=settings,
+            vector_service=vector_service,
+            embedding_service=embedding_service,
         )
-        graded_results, low_confidence = grade_documents(
-            documents=search_results,
-            threshold=threshold,
-        )
-
-        if low_confidence:
-            logger.info(
-                "query %s: low_confidence=True (graded %d/%d above threshold %.3f, "
-                "reranked=%s)",
-                session_id,
-                len(graded_results),
-                len(search_results),
-                threshold,
-                settings.enable_reranker,
-            )
 
         # Process query with agents
         text_response, voice_instructions, sources = await agent_service.process_query(
@@ -217,6 +273,252 @@ async def submit_query(
         # Onda 3 — never leak internal error details to clients.
         logger.exception("Error processing query for session %s", session_id)
         raise HTTPException(status_code=500, detail="Error processing query")
+
+
+@router.post("/query/stream")
+async def submit_query_stream(
+    session_id: str,
+    body: QueryRequest,
+    session_store: SessionStore = Depends(get_session_store),
+    vector_service: VectorService = Depends(get_vector_service),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    agent_service: AgentService = Depends(get_agent_service),
+    audio_service: AudioService = Depends(get_audio_service),
+):
+    """Streaming variant of /query — interleaves text deltas and audio chunks
+    on a single SSE stream. Cuts first-audible-word latency dramatically:
+    TTS for sentence #1 starts while the LLM is still writing sentence #2.
+
+    SSE event vocabulary:
+        event: sources       — once, before any text. data: {sources: [...]}
+        event: text_delta    — many. data: {delta: "..."}
+        event: audio_chunk   — many. data: {chunk: <base64>, sentence_idx, chunk_idx}
+        event: complete      — once, last event. data: {query_id, total_sentences}
+        event: error         — terminal failure. data: {error: "..."}
+
+    The frontend can choose to render text deltas live, queue audio_chunk
+    bytes into a single Web Audio AudioBufferSourceNode, or both. Audio
+    chunks are PCM (same format as /audio/stream), base64-encoded.
+
+    Sentence boundary detection is best-effort (see services/sentence_buffer.py).
+    Any text after the last detected boundary is flushed as a final TTS pass.
+    """
+    session = await session_store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+
+    if not session.is_ready:
+        raise HTTPException(status_code=400, detail="No documents uploaded yet")
+
+    settings = get_settings()
+    if session.query_count >= settings.max_queries_per_session:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Query limit reached ({settings.max_queries_per_session} per session). Restart to create a new session.",
+        )
+
+    try:
+        graded_results, low_confidence = await _retrieve_and_grade(
+            session_id=session_id,
+            query=body.query,
+            settings=settings,
+            vector_service=vector_service,
+            embedding_service=embedding_service,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error during retrieval for session %s", session_id)
+        raise HTTPException(status_code=500, detail="Error processing query")
+
+    sources = agent_service.get_sources_for_query(
+        query=body.query, context=graded_results, low_confidence=low_confidence
+    )
+    query_id = str(uuid.uuid4())
+
+    # Bounded concurrency for TTS fan-out. Voice answers are 2-4 sentences,
+    # so this realistically caps at ≤ 4 concurrent TTS calls in steady state
+    # — the semaphore exists to prevent a degenerate prompt with many tiny
+    # sentences from spawning 50 parallel OpenAI calls.
+    tts_semaphore = asyncio.Semaphore(4)
+
+    async def event_generator():
+        # Multiplex text + audio onto one stream via a queue. The text
+        # producer reads LLM deltas; per detected sentence boundary it
+        # spawns a TTS task that pushes audio chunks back into the queue.
+        # The main coroutine drains the queue and yields SSE-framed events.
+        queue: asyncio.Queue = asyncio.Queue()
+        producer_done = asyncio.Event()
+        text_buffer: list[str] = [""]  # mutable holder for closure access
+        accumulated_text: list[str] = [""]
+        sentence_idx_holder = [0]
+        tts_tasks: list[asyncio.Task] = []
+
+        try:
+            yield (
+                "event: sources\n"
+                f"data: {json.dumps({'sources': sources})}\n\n"
+            )
+        except Exception:
+            pass  # if the client already disconnected, fall through to cleanup
+
+        async def tts_for_sentence(sentence: str, sentence_idx: int) -> None:
+            """Stream PCM chunks for one sentence into the queue.
+
+            Bounded by tts_semaphore to cap concurrent OpenAI calls when the
+            LLM emits many short sentences in a burst. Failures are logged
+            and surfaced as audio_error events; they never abort the stream.
+            """
+            async with tts_semaphore:
+                try:
+                    chunk_idx = 0
+                    async for b64chunk in audio_service.stream_tts(
+                        text=sentence,
+                        voice=body.voice,
+                        instructions=DEFAULT_TTS_INSTRUCTIONS,
+                    ):
+                        await queue.put({
+                            "event": "audio_chunk",
+                            "data": {
+                                "chunk": b64chunk,
+                                "sentence_idx": sentence_idx,
+                                "chunk_idx": chunk_idx,
+                            },
+                        })
+                        chunk_idx += 1
+                except Exception:
+                    logger.exception(
+                        "tts_for_sentence: failed for sentence %d (query %s)",
+                        sentence_idx, query_id,
+                    )
+                    await queue.put({
+                        "event": "audio_error",
+                        "data": {"sentence_idx": sentence_idx, "error": "tts_failed"},
+                    })
+
+        async def text_producer() -> None:
+            """Drive LLM streaming, push text deltas, fan out TTS per sentence."""
+            try:
+                async for delta in agent_service.stream_response(
+                    query=body.query,
+                    context=graded_results,
+                    low_confidence=low_confidence,
+                ):
+                    accumulated_text[0] += delta
+                    text_buffer[0] += delta
+                    await queue.put({
+                        "event": "text_delta",
+                        "data": {"delta": delta},
+                    })
+
+                    sentences, remainder = split_complete_sentences(text_buffer[0])
+                    text_buffer[0] = remainder
+                    for sentence in sentences:
+                        idx = sentence_idx_holder[0]
+                        sentence_idx_holder[0] += 1
+                        tts_tasks.append(
+                            asyncio.create_task(tts_for_sentence(sentence, idx))
+                        )
+
+                # LLM done — flush any trailing remainder as the final sentence.
+                final = flush_remainder(text_buffer[0])
+                if final:
+                    idx = sentence_idx_holder[0]
+                    sentence_idx_holder[0] += 1
+                    tts_tasks.append(
+                        asyncio.create_task(tts_for_sentence(final, idx))
+                    )
+            except Exception:
+                logger.exception(
+                    "text_producer: failed for session %s query %s",
+                    session_id, query_id,
+                )
+                await queue.put({
+                    "event": "error",
+                    "data": {"error": "text_stream_failed"},
+                })
+            finally:
+                # Wait for all spawned TTS tasks to drain their chunks before
+                # signaling done — otherwise the consumer may exit early and
+                # cancel pending audio.
+                if tts_tasks:
+                    await asyncio.gather(*tts_tasks, return_exceptions=True)
+                producer_done.set()
+
+        producer = asyncio.create_task(text_producer())
+
+        # Drain the queue until producer is done AND queue is empty.
+        try:
+            while not (producer_done.is_set() and queue.empty()):
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+                yield (
+                    f"event: {event['event']}\n"
+                    f"data: {json.dumps(event['data'])}\n\n"
+                )
+
+            yield (
+                "event: complete\n"
+                f"data: {json.dumps({'query_id': query_id, 'total_sentences': sentence_idx_holder[0]})}\n\n"
+            )
+        finally:
+            try:
+                await producer  # ensure cancellations propagate cleanly
+            except Exception:
+                pass
+
+            full_text = accumulated_text[0]
+
+            # Anti-abuse: always bump query_count once we got past the
+            # rate-limit check, even when the stream errored or produced
+            # empty text. The user consumed retrieval / LLM / partial TTS
+            # budget regardless, and gating persistence on success would
+            # let them retry a failed stream for free.
+            try:
+                await session_store.add_query(
+                    session_id,
+                    QueryRecord(
+                        query_id=query_id,
+                        question=body.query,
+                        response=full_text or "",
+                        voice=body.voice,
+                        sources=sources,
+                        created_at=datetime.now(timezone.utc),
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "submit_query_stream: failed to persist query history"
+                )
+
+            # Cache the text only when there's something to TTS — the
+            # /audio/stream and /audio/download endpoints look up by
+            # query_id, and empty text isn't useful to either.
+            if full_text.strip():
+                _cleanup_expired_query_results()
+                while len(_query_results) >= MAX_QUERY_RESULTS:
+                    _query_results.popitem(last=False)
+                _query_results[query_id] = {
+                    "data": {
+                        "text_response": full_text,
+                        "voice_instructions": DEFAULT_TTS_INSTRUCTIONS,
+                        "voice": body.voice,
+                        "session_id": session_id,
+                    },
+                    "created_at": time.time(),
+                }
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/queries", response_model=QueryHistoryResponse)
