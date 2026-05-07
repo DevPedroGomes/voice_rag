@@ -1,480 +1,364 @@
-"use client";
+import Link from "next/link";
+import {
+  Mic,
+  FileUp,
+  Cpu,
+  Search,
+  MessageSquare,
+  Volume2,
+  ArrowRight,
+  Zap,
+  Lock,
+  Sparkles,
+  Github,
+  Play,
+  Layers,
+  Database,
+  Activity,
+} from "lucide-react";
 
-import { useState, useCallback, useEffect } from "react";
-import { toast } from "sonner";
-import type { VoiceType, QueryRecord } from "@/types/api";
-import { getAudioStreamUrl } from "@/lib/api-client";
-import { useSession } from "@/hooks/use-session";
-import { useDocuments } from "@/hooks/use-documents";
-import { useQuery } from "@/hooks/use-query";
-import { useAudioStream } from "@/hooks/use-audio-stream";
-import { useLocale } from "@/hooks/use-locale";
-import { getTranslations } from "@/lib/i18n";
-import { getQueryHistory } from "@/lib/api-client";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { PDFUpload } from "@/components/pdf-upload";
-import { DocumentList } from "@/components/document-list";
-import { VoiceSelector } from "@/components/voice-selector";
-import { QueryInput } from "@/components/query-input";
-import { QueryResponseCard } from "@/components/query-response";
-import { ChatHistory } from "@/components/chat-history";
-import { cn } from "@/lib/utils";
-import { FileUp, Cpu, Search, MessageSquare as MsgIcon, Volume2 } from "lucide-react";
+export const metadata = {
+  title: "Voice RAG — Speak the question. Hear the answer.",
+  description:
+    "Upload PDFs, ask out loud, hear cited answers in natural speech. End-to-end voice loop with hybrid retrieval and streaming TTS.",
+};
 
-// ─── Pipeline Section (shown when no documents) ───
+const PIPELINE = [
+  {
+    n: 1,
+    icon: FileUp,
+    title: "Upload PDF",
+    desc: "Document is split into semantic chunks via LangChain text splitters.",
+    accent: "text-blue-600 bg-blue-50",
+  },
+  {
+    n: 2,
+    icon: Cpu,
+    title: "Embed Locally",
+    desc: "FastEmbed (BAAI/bge-small-en-v1.5) runs on the server — no external embedding API.",
+    accent: "text-violet-600 bg-violet-50",
+  },
+  {
+    n: 3,
+    icon: Search,
+    title: "Hybrid Retrieval",
+    desc: "Question is embedded and fused with full-text search via pgvector + tsvector.",
+    accent: "text-emerald-600 bg-emerald-50",
+  },
+  {
+    n: 4,
+    icon: MessageSquare,
+    title: "AI Synthesis",
+    desc: "Processor Agent (GPT-4.1-mini) writes a grounded answer with citations.",
+    accent: "text-orange-600 bg-orange-50",
+  },
+  {
+    n: 5,
+    icon: Volume2,
+    title: "Stream Speech",
+    desc: "GPT-4o-mini-TTS streams PCM audio over SSE into the Web Audio API.",
+    accent: "text-pink-600 bg-pink-50",
+  },
+];
 
-function PipelineSection({ t }: { t: (key: string, params?: Record<string, string | number>) => string }) {
-  const steps = [
-    { icon: FileUp, title: t('pipeline.1.title'), desc: t('pipeline.1.desc'), color: "bg-blue-50 text-blue-600" },
-    { icon: Cpu, title: t('pipeline.2.title'), desc: t('pipeline.2.desc'), color: "bg-purple-50 text-purple-600" },
-    { icon: Search, title: t('pipeline.3.title'), desc: t('pipeline.3.desc'), color: "bg-emerald-50 text-emerald-600" },
-    { icon: MsgIcon, title: t('pipeline.4.title'), desc: t('pipeline.4.desc'), color: "bg-orange-50 text-orange-600" },
-    { icon: Volume2, title: t('pipeline.5.title'), desc: t('pipeline.5.desc'), color: "bg-pink-50 text-pink-600" },
-  ];
+const FEATURES = [
+  {
+    icon: Activity,
+    title: "Sub-1.5s first audible word",
+    desc: "Audio starts streaming before the LLM has finished writing — perceived latency drops to near-zero.",
+    span: "md:col-span-2",
+  },
+  {
+    icon: Lock,
+    title: "Tenant-isolated retrieval",
+    desc: "Every chunk row carries a session_id. Vector and keyword queries WHERE-filter on it before fusion. No cross-tenant leak.",
+  },
+  {
+    icon: Database,
+    title: "Hybrid search, not just vectors",
+    desc: "pgvector HNSW + tsvector GIN, merged via RRF. Catches both semantic similarity and exact-term matches.",
+  },
+  {
+    icon: Zap,
+    title: "Local embeddings",
+    desc: "FastEmbed runs on the server in ONNX. No OpenAI cost for ingestion, full data control.",
+  },
+  {
+    icon: Sparkles,
+    title: "9 distinct voices",
+    desc: "Coral, alloy, echo, fable, onyx, nova, sage, shimmer, verse — pick a voice that fits the use case.",
+    span: "md:col-span-2",
+  },
+];
 
+const STACK = [
+  "Next.js 16",
+  "React 19",
+  "FastAPI",
+  "PostgreSQL 17",
+  "pgvector",
+  "FastEmbed (ONNX)",
+  "OpenAI Whisper",
+  "GPT-4.1-mini",
+  "GPT-4o-mini-TTS",
+  "OpenAI Agents SDK",
+  "Server-Sent Events",
+  "Web Audio API",
+];
+
+function Waveform() {
+  // Static visual: 32 vertical bars with staggered animation.
+  const bars = Array.from({ length: 32 });
   return (
-    <div className="mb-6 animate-fade-in-up">
-      <div className="flex items-center gap-3 mb-4">
-        <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest font-mono">{t('pipeline.label')}</span>
-        <div className="h-px flex-1 bg-neutral-200" />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-5">
-        {steps.map((step, i) => (
-          <div key={step.title} className="bg-white border border-neutral-200 rounded-xl p-3 card-shadow">
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`rounded-lg p-1.5 ${step.color}`}>
-                <step.icon className="h-3.5 w-3.5" />
-              </div>
-              <span className="text-[10px] font-mono text-neutral-400">{i + 1}</span>
-            </div>
-            <h4 className="text-xs font-semibold text-neutral-900 mb-0.5">{step.title}</h4>
-            <p className="text-[11px] text-neutral-500 leading-relaxed">{step.desc}</p>
-          </div>
-        ))}
-      </div>
-      <p className="text-[11px] text-neutral-400 font-mono text-center mt-3">
-        {t('pipeline.footer')}
-      </p>
+    <div className="flex items-end justify-center gap-1.5 h-24" aria-hidden>
+      {bars.map((_, i) => {
+        const delay = (i % 8) * 0.08;
+        const heightSeed = 30 + ((i * 37) % 70);
+        return (
+          <span
+            key={i}
+            className="w-1.5 rounded-full bg-gradient-to-t from-orange-400/40 via-orange-500/80 to-pink-500/80 animate-pulse"
+            style={{
+              height: `${heightSeed}%`,
+              animationDelay: `${delay}s`,
+              animationDuration: "1.4s",
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
 
-// ─── Step Card ───
-
-function StepCard({
-  number,
-  title,
-  subtitle,
-  status,
-  expanded,
-  onToggle,
-  disabled,
-  children,
-}: {
-  number: number;
-  title: string;
-  subtitle?: string;
-  status: "active" | "completed" | "locked";
-  expanded: boolean;
-  onToggle?: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  const isClickable = status === "completed" && onToggle;
-
+export default function LandingPage() {
   return (
-    <div
-      className={cn(
-        "bg-white border rounded-2xl card-shadow transition-all duration-300",
-        status === "locked" ? "opacity-50 border-neutral-100" : "border-neutral-200",
-        expanded && status !== "locked" && "ring-1 ring-orange-200"
-      )}
-    >
-      {/* Header */}
-      <button
-        type="button"
-        className={cn(
-          "w-full flex items-center gap-4 p-5 text-left",
-          isClickable ? "cursor-pointer hover:bg-neutral-50 transition-colors rounded-2xl" : "cursor-default"
-        )}
-        onClick={isClickable ? onToggle : undefined}
-        disabled={status === "locked"}
-      >
-        {/* Number badge */}
-        <div
-          className={cn(
-            "flex items-center justify-center w-9 h-9 rounded-full text-sm font-semibold shrink-0 transition-colors",
-            status === "completed" && "bg-emerald-100 text-emerald-700",
-            status === "active" && "bg-orange-100 text-orange-700",
-            status === "locked" && "bg-neutral-100 text-neutral-400"
-          )}
-        >
-          {status === "completed" ? (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-            </svg>
-          ) : (
-            number
-          )}
-        </div>
-
-        {/* Title */}
-        <div className="flex-1 min-w-0">
-          <h3 className={cn(
-            "text-sm font-semibold",
-            status === "locked" ? "text-neutral-400" : "text-neutral-900"
-          )}>
-            {title}
-          </h3>
-          {subtitle && (
-            <p className="text-xs text-neutral-400 mt-0.5">{subtitle}</p>
-          )}
-        </div>
-
-        {/* Expand/collapse indicator */}
-        {isClickable && (
-          <svg
-            className={cn(
-              "w-4 h-4 text-neutral-400 transition-transform",
-              expanded && "rotate-180"
-            )}
-            fill="none" stroke="currentColor" viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        )}
-      </button>
-
-      {/* Content */}
-      {expanded && status !== "locked" && (
-        <div className={cn(
-          "px-5 pb-5 animate-fade-in-up",
-          disabled && "pointer-events-none opacity-60"
-        )}>
-          <div className="border-t border-neutral-100 pt-4">
-            {children}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Main Page ───
-
-export default function Home() {
-  const {
-    session,
-    sessionId,
-    isLoading: sessionLoading,
-    documents,
-    isReady,
-    queriesRemaining,
-    documentsRemaining,
-    refreshSession,
-    clearSession,
-  } = useSession();
-
-  const { upload, isUploading, uploadError, deleteDocument } = useDocuments();
-  const { submit, isLoading: queryLoading, response, error: queryError } = useQuery();
-  const {
-    isPlaying,
-    isPaused,
-    isLoading: audioLoading,
-    error: audioError,
-    play: playAudio,
-    stop: stopAudio,
-    togglePause,
-  } = useAudioStream();
-
-  const { locale, changeLocale } = useLocale();
-  const t = getTranslations(locale);
-
-  const [selectedVoice, setSelectedVoice] = useState<VoiceType>("coral");
-  const [queryHistory, setQueryHistory] = useState<QueryRecord[]>([]);
-
-  // Step expansion state
-  const hasDocuments = documents.length > 0;
-  const [step1Expanded, setStep1Expanded] = useState(true);
-  const [step2Expanded, setStep2Expanded] = useState(false);
-
-  // Auto-transition: when first document uploaded, collapse step 1 and open step 2/3
-  useEffect(() => {
-    if (hasDocuments) {
-      setStep1Expanded(false);
-      setStep2Expanded(false);
-    } else {
-      setStep1Expanded(true);
-    }
-  }, [hasDocuments]);
-
-  // Load query history
-  useEffect(() => {
-    if (sessionId) {
-      getQueryHistory(sessionId)
-        .then((res) => setQueryHistory(res.queries))
-        .catch(() => { toast.error(t('toast.historyFailed')); });
-    }
-  }, [sessionId]);
-
-  const handleUpload = useCallback(
-    async (file: File) => {
-      if (!sessionId) return;
-
-      const result = await upload(sessionId, file);
-      if (result) {
-        toast.success(t('toast.uploaded', { name: file.name }));
-        await refreshSession();
-      } else {
-        toast.error(uploadError || t('toast.uploadFailed'));
-      }
-    },
-    [sessionId, upload, refreshSession, uploadError]
-  );
-
-  const handleDeleteDocument = useCallback(
-    async (documentId: string) => {
-      if (!sessionId) return;
-
-      const success = await deleteDocument(sessionId, documentId);
-      if (success) {
-        toast.success(t('toast.docRemoved'));
-        await refreshSession();
-      } else {
-        toast.error(t('toast.docRemoveFailed'));
-      }
-    },
-    [sessionId, deleteDocument, refreshSession]
-  );
-
-  const handleQuery = useCallback(
-    async (query: string) => {
-      if (!sessionId) return;
-
-      const result = await submit(sessionId, query, selectedVoice);
-      if (result) {
-        if (result.audio_stream_url) {
-          playAudio(getAudioStreamUrl(sessionId, result.query_id));
-        }
-        await refreshSession();
-        getQueryHistory(sessionId)
-          .then((res) => setQueryHistory(res.queries))
-          .catch((err) => { console.error("Failed to refresh query history:", err); });
-      } else {
-        toast.error(queryError || t('toast.queryFailed'));
-      }
-    },
-    [sessionId, selectedVoice, submit, playAudio, queryError, refreshSession]
-  );
-
-  const handlePlayAudio = useCallback(() => {
-    if (!sessionId || !response?.query_id) return;
-    playAudio(getAudioStreamUrl(sessionId, response.query_id));
-  }, [sessionId, response, playAudio]);
-
-  const handleRestart = useCallback(() => {
-    stopAudio();
-    setQueryHistory([]);
-    clearSession();
-    setStep1Expanded(true);
-    setStep2Expanded(false);
-    toast.success(t('toast.restarted'));
-  }, [stopAudio, clearSession]);
-
-  // ─── Loading state ───
-  if (sessionLoading) {
-    return (
-      <main className="min-h-screen bg-[#fafafa]">
-        <div className="sticky top-0 z-50 border-b border-neutral-200 bg-white/90 backdrop-blur-xl">
-          <div className="max-w-3xl mx-auto px-6 sm:px-8 h-14 flex items-center">
-            <Skeleton className="h-7 w-40" />
-          </div>
-        </div>
-        <div className="max-w-3xl mx-auto py-10 px-6 sm:px-8 space-y-4">
-          <Skeleton className="h-20 w-full rounded-2xl" />
-          <Skeleton className="h-20 w-full rounded-2xl" />
-          <Skeleton className="h-20 w-full rounded-2xl" />
-        </div>
-      </main>
-    );
-  }
-
-  // Determine step statuses
-  const step1Status = hasDocuments ? "completed" as const : "active" as const;
-  const step2Status = hasDocuments ? "completed" as const : "locked" as const;
-  const step3Status = isReady ? "active" as const : "locked" as const;
-
-  // Busy state: prevent conflicting actions
-  const isBusy = isUploading || queryLoading;
-
-  // Step 1 subtitle
-  const step1Subtitle = !hasDocuments
-    ? t('step1.subtitle.empty')
-    : documents.length === 1
-      ? t('step1.subtitle.one')
-      : t('step1.subtitle.many', { count: documents.length });
-
-  return (
-    <main className="min-h-screen bg-[#fafafa]">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-neutral-200 bg-white/90 backdrop-blur-xl">
-        <div className="max-w-3xl mx-auto px-6 sm:px-8 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <img src="/logo.png" alt="Logo" className="h-8 w-8 rounded-lg object-cover" />
-            <span className="font-semibold tracking-tight text-neutral-900">{t('nav.title')}</span>
+    <main className="min-h-screen bg-[#fafafa] text-neutral-900 antialiased">
+      {/* ─── Nav ─── */}
+      <header className="sticky top-0 z-50 border-b border-neutral-200/70 bg-white/80 backdrop-blur-xl">
+        <nav className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2.5">
+            <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-pink-500 text-white">
+              <Mic size={16} strokeWidth={2.5} />
+            </span>
+            <span className="font-semibold tracking-tight">Voice RAG</span>
+          </Link>
+          <div className="hidden sm:flex items-center gap-6 text-sm text-neutral-600">
+            <a href="#how" className="hover:text-neutral-900 transition-colors">How it works</a>
+            <a href="#features" className="hover:text-neutral-900 transition-colors">Features</a>
+            <a href="#stack" className="hover:text-neutral-900 transition-colors">Stack</a>
           </div>
           <div className="flex items-center gap-2">
-            {session && (
-              <span className="text-xs text-neutral-400 font-mono hidden sm:inline">
-                {queriesRemaining} {t('nav.queries')} · {documentsRemaining} {t('nav.docsLeft')}
-              </span>
-            )}
-            {/* Language toggle */}
-            <div className="flex items-center text-xs font-mono text-neutral-400 border border-neutral-200 rounded-md overflow-hidden">
-              <button
-                type="button"
-                onClick={() => changeLocale('en')}
-                className={cn(
-                  "px-1.5 py-1 transition-colors",
-                  locale === 'en' ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
-                )}
-              >
-                EN
-              </button>
-              <button
-                type="button"
-                onClick={() => changeLocale('pt')}
-                className={cn(
-                  "px-1.5 py-1 transition-colors",
-                  locale === 'pt' ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
-                )}
-              >
-                PT
-              </button>
-            </div>
-            <Button variant="outline" size="sm" onClick={handleRestart} className="text-xs">
-              {t('nav.restart')}
-            </Button>
+            <a
+              href="https://github.com/devpedrogomes/voice_rag"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:inline-flex items-center gap-1.5 text-xs text-neutral-600 hover:text-neutral-900 transition-colors px-3 py-1.5 rounded-full border border-neutral-200 bg-white"
+            >
+              <Github size={14} /> Source
+            </a>
+            <Link
+              href="/app"
+              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 transition-colors px-3 sm:px-4 py-1.5 sm:py-2 rounded-full"
+            >
+              Try it <ArrowRight size={14} />
+            </Link>
           </div>
-        </div>
+        </nav>
       </header>
 
-      {/* Steps */}
-      <div className="max-w-3xl mx-auto px-6 sm:px-8 py-8 space-y-4">
+      {/* ─── Hero ─── */}
+      <section className="relative overflow-hidden">
+        {/* Soft radial bg */}
+        <div
+          className="absolute inset-0 -z-10"
+          aria-hidden
+          style={{
+            background:
+              "radial-gradient(ellipse 60% 40% at 50% 0%, rgba(251,146,60,0.12), transparent 60%), radial-gradient(ellipse 50% 30% at 50% 80%, rgba(236,72,153,0.08), transparent 70%)",
+          }}
+        />
 
-        {/* Welcome + Pipeline (only when no documents) */}
-        {!hasDocuments && (
-          <>
-            <div className="text-center pb-6 animate-fade-in-up">
-              <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">
-                {t('welcome.title')}
-              </h2>
-              <p className="text-neutral-500 mt-2 text-sm max-w-md mx-auto">
-                {t('welcome.subtitle')}
-              </p>
-            </div>
-            <PipelineSection t={t} />
-          </>
-        )}
+        <div className="max-w-5xl mx-auto px-6 pt-16 pb-20 sm:pt-24 sm:pb-28 text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-neutral-200 text-xs text-neutral-600 mb-6 animate-fade-in-up shadow-sm">
+            <span className="inline-flex items-center gap-1 text-orange-600 font-medium">
+              <Sparkles size={12} /> Voice + RAG
+            </span>
+            <span className="text-neutral-300">·</span>
+            <span>Production showcase</span>
+          </div>
 
-        {/* Step 1: Upload Documents */}
-        <StepCard
-          number={1}
-          title={t('step1.title')}
-          subtitle={step1Subtitle}
-          status={step1Status}
-          expanded={step1Expanded}
-          onToggle={() => setStep1Expanded(!step1Expanded)}
-          disabled={queryLoading}
-        >
-          <div className="space-y-4">
-            <PDFUpload
-              onUpload={handleUpload}
-              isUploading={isUploading}
-              disabled={!sessionId || documentsRemaining <= 0 || queryLoading}
-            />
-            {documentsRemaining <= 0 && (
-              <p className="text-xs text-neutral-400 text-center">{t('step1.limitReached')}</p>
-            )}
-            {documents.length > 0 && (
-              <div className="pt-2">
-                <DocumentList documents={documents} onDelete={handleDeleteDocument} />
+          <h1
+            className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-semibold tracking-tighter text-neutral-900 max-w-4xl mx-auto animate-fade-in-up"
+            style={{ animationDelay: "0.1s" }}
+          >
+            Speak the question.
+            <br />
+            <span className="bg-gradient-to-r from-orange-500 via-pink-500 to-violet-500 bg-clip-text text-transparent">
+              Hear the answer.
+            </span>
+          </h1>
+
+          <p
+            className="mt-6 text-lg sm:text-xl text-neutral-600 max-w-2xl mx-auto leading-relaxed animate-fade-in-up"
+            style={{ animationDelay: "0.2s" }}
+          >
+            Upload PDFs, ask out loud, hear cited answers streamed back as natural speech.
+            Full voice loop in production — mic capture, Whisper STT, hybrid retrieval, low-latency TTS.
+          </p>
+
+          <div
+            className="flex flex-col sm:flex-row gap-3 items-center justify-center mt-8 animate-fade-in-up"
+            style={{ animationDelay: "0.3s" }}
+          >
+            <Link
+              href="/app"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-neutral-900 text-white text-sm font-semibold hover:bg-neutral-800 transition-all hover:-translate-y-0.5 shadow-lg shadow-neutral-900/10"
+            >
+              <Play size={16} /> Try the live demo
+            </Link>
+            <a
+              href="#how"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-full bg-white text-neutral-700 text-sm font-medium border border-neutral-200 hover:border-neutral-300 transition-colors"
+            >
+              How it works <ArrowRight size={14} />
+            </a>
+          </div>
+
+          <p className="text-xs text-neutral-400 mt-5 font-mono">
+            Showcase mode · 5 queries / 3 docs / 5-min session TTL
+          </p>
+
+          {/* Waveform */}
+          <div className="mt-12 max-w-md mx-auto animate-fade-in-up" style={{ animationDelay: "0.4s" }}>
+            <Waveform />
+          </div>
+        </div>
+      </section>
+
+      {/* ─── How it works ─── */}
+      <section id="how" className="border-y border-neutral-200/70 bg-white">
+        <div className="max-w-6xl mx-auto px-6 py-16 sm:py-20">
+          <div className="text-center mb-12">
+            <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">Pipeline</span>
+            <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight mt-2">
+              Five stages, end to end
+            </h2>
+            <p className="text-neutral-600 mt-3 max-w-xl mx-auto">
+              Every voice query travels this exact path. No black box.
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            {PIPELINE.map((step) => (
+              <div
+                key={step.n}
+                className="relative bg-white border border-neutral-200/80 rounded-2xl p-5 card-shadow hover-lift"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg ${step.accent}`}>
+                    <step.icon size={16} strokeWidth={2.4} />
+                  </span>
+                  <span className="text-xs font-mono text-neutral-400">{`0${step.n}`}</span>
+                </div>
+                <h3 className="font-semibold text-sm text-neutral-900 mb-1.5">{step.title}</h3>
+                <p className="text-xs text-neutral-500 leading-relaxed">{step.desc}</p>
               </div>
-            )}
+            ))}
           </div>
-        </StepCard>
 
-        {/* Step 2: Select Voice */}
-        <StepCard
-          number={2}
-          title={t('step2.title')}
-          subtitle={hasDocuments ? selectedVoice.charAt(0).toUpperCase() + selectedVoice.slice(1) : t('step2.subtitle.locked')}
-          status={step2Status}
-          expanded={step2Expanded}
-          onToggle={hasDocuments ? () => setStep2Expanded(!step2Expanded) : undefined}
-          disabled={queryLoading}
-        >
-          <VoiceSelector
-            value={selectedVoice}
-            onChange={setSelectedVoice}
-            disabled={queryLoading}
-          />
-        </StepCard>
+          <p className="text-center text-xs text-neutral-400 font-mono mt-10">
+            FastEmbed local · pgvector + tsvector · OpenAI Agents SDK · SSE audio streaming
+          </p>
+        </div>
+      </section>
 
-        {/* Step 3: Ask a Question */}
-        <StepCard
-          number={3}
-          title={t('step3.title')}
-          subtitle={isReady ? t('step3.subtitle.ready') : t('step3.subtitle.locked')}
-          status={step3Status}
-          expanded={isReady}
-        >
-          <div className="space-y-4">
-            <QueryInput
-              onSubmit={handleQuery}
-              isLoading={queryLoading}
-              disabled={!isReady || queriesRemaining <= 0 || isUploading}
-              sessionId={sessionId}
-            />
-            {queriesRemaining <= 0 && (
-              <p className="text-sm text-destructive text-center">
-                {t('step3.queryLimit')}
-              </p>
-            )}
+      {/* ─── Features bento ─── */}
+      <section id="features" className="bg-[#fafafa]">
+        <div className="max-w-6xl mx-auto px-6 py-16 sm:py-24">
+          <div className="text-center mb-12">
+            <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">What makes it different</span>
+            <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight mt-2">
+              Engineered for production, not demos
+            </h2>
           </div>
-        </StepCard>
 
-        {/* Response (appears after query) */}
-        {(response || queryLoading) && (
-          <div className="animate-fade-in-up">
-            <QueryResponseCard
-              response={response}
-              isLoading={queryLoading}
-              isAudioPlaying={isPlaying}
-              isAudioPaused={isPaused}
-              isAudioLoading={audioLoading}
-              onPlayAudio={handlePlayAudio}
-              onStopAudio={stopAudio}
-              onTogglePause={togglePause}
-              audioError={audioError}
-            />
+          <div className="grid gap-4 md:grid-cols-3 auto-rows-[180px]">
+            {FEATURES.map((f, i) => (
+              <article
+                key={i}
+                className={`relative rounded-2xl bg-white border border-neutral-200/80 p-6 card-shadow hover-lift ${f.span ?? ""}`}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-neutral-100 text-neutral-700">
+                    <f.icon size={16} strokeWidth={2.4} />
+                  </span>
+                  <Layers size={14} className="text-neutral-300" />
+                </div>
+                <h3 className="font-semibold text-base mb-1.5">{f.title}</h3>
+                <p className="text-sm text-neutral-500 leading-relaxed">{f.desc}</p>
+              </article>
+            ))}
           </div>
-        )}
+        </div>
+      </section>
 
-        {/* Chat History */}
-        {queryHistory.length > 0 && (
-          <div className="animate-fade-in-up">
-            <ChatHistory queries={queryHistory} />
+      {/* ─── Tech stack ─── */}
+      <section id="stack" className="border-t border-neutral-200/70 bg-white">
+        <div className="max-w-4xl mx-auto px-6 py-16 sm:py-20 text-center">
+          <span className="text-xs uppercase tracking-widest text-neutral-400 font-mono">Stack</span>
+          <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight mt-2 mb-8">
+            Built with
+          </h2>
+          <div className="flex flex-wrap justify-center gap-2">
+            {STACK.map((tech) => (
+              <span
+                key={tech}
+                className="inline-flex items-center px-3.5 py-1.5 rounded-full bg-neutral-50 border border-neutral-200 text-sm text-neutral-700"
+              >
+                {tech}
+              </span>
+            ))}
           </div>
-        )}
+        </div>
+      </section>
 
-        {/* Footer */}
-        <footer className="pt-8 pb-4 text-center text-sm text-neutral-400">
-          {t('footer')}
-        </footer>
-      </div>
+      {/* ─── Final CTA ─── */}
+      <section className="border-t border-neutral-200/70 bg-gradient-to-b from-[#fafafa] to-white">
+        <div className="max-w-3xl mx-auto px-6 py-20 text-center">
+          <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight">
+            Ready to talk to your documents?
+          </h2>
+          <p className="text-neutral-600 mt-3 max-w-xl mx-auto">
+            Upload a PDF, pick a voice, ask anything. The demo runs on a 5-minute session.
+          </p>
+          <Link
+            href="/app"
+            className="inline-flex items-center gap-2 mt-8 px-6 py-3 rounded-full bg-neutral-900 text-white text-sm font-semibold hover:bg-neutral-800 transition-all hover:-translate-y-0.5 shadow-lg shadow-neutral-900/10"
+          >
+            <Mic size={16} /> Open the app
+          </Link>
+        </div>
+      </section>
+
+      {/* ─── Footer ─── */}
+      <footer className="border-t border-neutral-200/70 bg-white">
+        <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-neutral-500">
+          <p>Built by Pedro Gomes — full-stack AI engineer.</p>
+          <div className="flex items-center gap-4">
+            <a
+              href="https://github.com/devpedrogomes/voice_rag"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-neutral-900 transition-colors inline-flex items-center gap-1.5"
+            >
+              <Github size={14} /> GitHub
+            </a>
+            <Link href="/app" className="hover:text-neutral-900 transition-colors">
+              Live demo →
+            </Link>
+          </div>
+        </div>
+      </footer>
     </main>
   );
 }
