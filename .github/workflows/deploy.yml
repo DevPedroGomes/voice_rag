@@ -22,12 +22,24 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script_stop: true
           script: |
-            set -euo pipefail
+            set -eu
+            echo "[deploy] user=$(whoami) host=$(hostname) pwd=$(pwd)"
             cd /opt/showcase/voice_rag
-            [ -f .deploy-freeze ] && { echo "Freeze ativo, abortando deploy"; exit 1; }
+            echo "[deploy] cwd ok: $(pwd)"
+            if [ -f .deploy-freeze ]; then
+              echo "[deploy] FREEZE active, aborting"
+              exit 1
+            fi
+            echo "[deploy] git fetch..."
             git fetch origin
+            echo "[deploy] git reset..."
             git reset --hard origin/main
-            docker compose pull --ignore-pull-failures
+            echo "[deploy] HEAD now $(git rev-parse --short HEAD)"
+            echo "[deploy] docker compose pull..."
+            docker compose pull --ignore-pull-failures || true
+            echo "[deploy] docker compose up --build..."
             docker compose up -d --build --remove-orphans
+            echo "[deploy] cleanup images..."
             docker image prune -f
+            echo "[deploy] final state:"
             docker compose ps
