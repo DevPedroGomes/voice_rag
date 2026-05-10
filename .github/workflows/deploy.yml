@@ -1,0 +1,33 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: SSH into VPS and deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/showcase/voice_rag
+            [ -f .deploy-freeze ] && { echo "Freeze ativo, abortando deploy"; exit 1; }
+            git fetch origin
+            git reset --hard origin/main
+            docker compose pull --ignore-pull-failures
+            docker compose up -d --build --remove-orphans
+            docker image prune -f
+            docker compose ps
