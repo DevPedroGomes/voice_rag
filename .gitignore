@@ -20,3 +20,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# deploy control (VPS-local)
+.deploy-freeze
