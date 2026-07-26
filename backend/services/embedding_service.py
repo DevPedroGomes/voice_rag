@@ -3,14 +3,36 @@ import os
 from fastembed import TextEmbedding
 
 
+# Modelo fixado explicitamente em vez de depender do default do FastEmbed.
+# O default e uma escolha da biblioteca e pode mudar entre versoes — se mudar,
+# muda a dimensao, e a coluna `embeddings.embedding` e `vector(384)` fixo. O
+# projeto irmao (group-documents) ficou com a ingestao 100% quebrada por meses
+# exatamente por esse desalinhamento entre modelo e schema.
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+
+# Tem que bater com vector(N) em `embeddings.embedding`. Mudar exige migration.
+EMBEDDING_DIM = 384
+
+
 class EmbeddingService:
     """Service for generating text embeddings using FastEmbed."""
 
     def __init__(self):
-        self._model = TextEmbedding(cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
-        # Get embedding dimension from a test embedding
+        self._model = TextEmbedding(
+            model_name=EMBEDDING_MODEL,
+            cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"),
+        )
+        # Confere contra o schema logo no boot: falhar aqui, alto e claro, e
+        # muito melhor que gravar vetor de dimensao errada e so descobrir no
+        # INSERT — ou pior, nao descobrir.
         test_embedding = list(self._model.embed(["test"]))[0]
         self._embedding_dim = len(test_embedding)
+        if self._embedding_dim != EMBEDDING_DIM:
+            raise RuntimeError(
+                f"Dimensao do embedding mudou: modelo '{EMBEDDING_MODEL}' devolveu "
+                f"{self._embedding_dim}, mas o schema espera {EMBEDDING_DIM}. "
+                f"Alinhe o modelo, EMBEDDING_DIM e o vector(N) da tabela."
+            )
 
     @property
     def embedding_dim(self) -> int:

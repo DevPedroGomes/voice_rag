@@ -1,15 +1,15 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
+fastapi==0.140.0
+uvicorn[standard]==0.51.0
 python-multipart==0.0.20
 python-dotenv==1.0.1
-pydantic-settings==2.7.1
+pydantic-settings==2.14.2
 openai>=1.66.5
 openai-agents>=0.0.10
-asyncpg==0.30.0
-pgvector==0.3.6
-fastembed==0.4.2
-langchain-community==0.3.14
-pypdf==5.1.0
+asyncpg==0.31.0
+pgvector==0.5.0
+fastembed==0.8.0
+langchain-community==0.4.2
+pypdf==6.14.2
 # Sprint 2.1 — Cohere cross-encoder reranker (optional: gracefully degrades
 # to RRF order when COHERE_API_KEY is missing or the package is absent).
 cohere>=5.13.0
