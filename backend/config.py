@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 
 
@@ -160,9 +160,10 @@ class Settings(BaseSettings):
     enable_tts_cache: bool = True
     tts_cache_ttl_seconds: int = 86400  # 24h
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
     @property
     def max_file_size_bytes(self) -> int:
