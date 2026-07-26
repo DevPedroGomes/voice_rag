@@ -117,6 +117,10 @@ services:
       - "traefik.http.middlewares.voicerag-security.headers.browserXssFilter=true"
       - "traefik.http.middlewares.voicerag-security.headers.referrerPolicy=strict-origin-when-cross-origin"
       - "traefik.http.middlewares.voicerag-security.headers.frameDeny=true"
+      # CSP: era o unico dos 3 showcases sem esta politica.
+      # connect-src precisa do dominio da API (fetch + SSE de audio); blob:/data:
+      # cobrem o PCM decodificado na Web Audio API.
+      - "traefik.http.middlewares.voicerag-security.headers.contentSecurityPolicy=default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob: data:; connect-src 'self' https://voicerag-api.pgdev.com.br; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 volumes:
   pgdata:

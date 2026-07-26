@@ -152,7 +152,12 @@ def process_pdf(
         page_texts: list[str] = []
         for page_doc in pages:
             page_text = page_doc.page_content or ""
-            page_num = page_doc.metadata.get("page", None)
+            # PyPDFLoader indexa pagina a partir de 0; o usuario conta a partir
+            # de 1. Sem o +1 a citacao sai uma pagina adiantada ("pagina 0" para
+            # algo que esta na 1) — e precisao de pagina e justamente o ponto da
+            # citacao por voz.
+            raw_page = page_doc.metadata.get("page", None)
+            page_num = raw_page + 1 if isinstance(raw_page, int) else raw_page
             if page_text.strip():
                 page_texts.append(page_text)
 
