@@ -18,6 +18,7 @@ from models.schemas import (
     SourceInfo,
 )
 from config import get_settings
+from services import daily_budget
 from services.session_service import SessionStore, get_session_store
 from services.vector_service import VectorService, get_vector_service
 from services.embedding_service import EmbeddingService, get_embedding_service
@@ -202,6 +203,18 @@ async def submit_query(
             detail=f"Query limit reached ({settings.max_queries_per_session} per session). Restart to create a new session.",
         )
 
+
+    # Teto diario global. Consumido ANTES da chamada paga: contar depois deixa
+    # um burst de requests concorrentes passar inteiro, porque nenhum deles
+    # ainda foi contado.
+    allowed, _remaining = await daily_budget.consume("query", settings.daily_query_limit)
+    if not allowed:
+        raise HTTPException(
+            status_code=503,
+            detail="Daily limit for this demo reached. It resets at midnight UTC.",
+            headers={"Retry-After": str(daily_budget.seconds_until_utc_midnight())},
+        )
+
     try:
         graded_results, low_confidence = await _retrieve_and_grade(
             session_id=session_id,
@@ -268,9 +281,12 @@ async def submit_query(
         )
 
     except HTTPException:
+        await daily_budget.refund("query")
         raise
     except Exception:
         # Onda 3 — never leak internal error details to clients.
+        # A cota volta: falha nossa nao pode consumir o teto do proximo visitante.
+        await daily_budget.refund("query")
         logger.exception("Error processing query for session %s", session_id)
         raise HTTPException(status_code=500, detail="Error processing query")
 
@@ -317,6 +333,16 @@ async def submit_query_stream(
             detail=f"Query limit reached ({settings.max_queries_per_session} per session). Restart to create a new session.",
         )
 
+    # Mesmo teto diario global do /query: este caminho gasta LLM e TTS igual,
+    # e deixar so um dos dois protegido nao protege nada.
+    allowed, _remaining = await daily_budget.consume("query", settings.daily_query_limit)
+    if not allowed:
+        raise HTTPException(
+            status_code=503,
+            detail="Daily limit for this demo reached. It resets at midnight UTC.",
+            headers={"Retry-After": str(daily_budget.seconds_until_utc_midnight())},
+        )
+
     try:
         graded_results, low_confidence = await _retrieve_and_grade(
             session_id=session_id,
@@ -326,8 +352,10 @@ async def submit_query_stream(
             embedding_service=embedding_service,
         )
     except HTTPException:
+        await daily_budget.refund("query")
         raise
     except Exception:
+        await daily_budget.refund("query")
         logger.exception("Error during retrieval for session %s", session_id)
         raise HTTPException(status_code=500, detail="Error processing query")
 

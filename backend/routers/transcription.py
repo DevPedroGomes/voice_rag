@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from config import get_settings
 from models.schemas import TranscriptionResponse
+from services import daily_budget
 from services.session_service import SessionStore, get_session_store
 from services.transcription_service import (
     ALLOWED_AUDIO_EXTENSIONS,
@@ -108,6 +109,18 @@ async def transcribe_audio(
             detail=f"Audio too large. Maximum size is {MAX_AUDIO_BYTES} bytes.",
         )
 
+    # Teto diario global do Whisper. A cota por sessao acima protege contra um
+    # visitante; esta protege contra todos eles somados e contra troca de IP.
+    # Fica aqui, e nao no topo, porque tudo acima rejeita sem gastar nada: cobrar
+    # antes obrigaria cada uma dessas validacoes a lembrar de devolver a cota.
+    allowed, _remaining = await daily_budget.consume("transcribe", settings.daily_transcribe_limit)
+    if not allowed:
+        raise HTTPException(
+            status_code=503,
+            detail="Daily transcription limit for this demo reached. It resets at midnight UTC.",
+            headers={"Retry-After": str(daily_budget.seconds_until_utc_midnight())},
+        )
+
     started = time.monotonic()
     try:
         text, detected_lang = await transcription_service.transcribe(
@@ -122,6 +135,8 @@ async def transcribe_audio(
         status = 400 if any(
             kw in msg for kw in ("empty", "no speech", "extension", "too large")
         ) else 502
+        # Gravacao ruim ja e custo de UX; nao pode tambem consumir o teto do dia.
+        await daily_budget.refund("transcribe")
         logger.info(
             "transcription rejected (%d) for session %s: %s",
             status, session_id, msg,

@@ -48,7 +48,14 @@ services:
       # Contextual Retrieval enrichment (Sprint 4). Optional — ingest gracefully
       # embeds chunks raw when missing.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Teto diario global. Precisa de volume: contador em memoria zera a cada
+      # deploy, que e justamente quando o trafego costuma ser reproduzido.
+      DAILY_BUDGET_PATH: /data/daily_budget.json
+      # Corta toda chamada paga na hora, sem redeploy.
+      DEMO_KILL_SWITCH: ${DEMO_KILL_SWITCH:-0}
       ENABLE_CONTEXTUAL_RETRIEVAL: ${ENABLE_CONTEXTUAL_RETRIEVAL:-true}
+    volumes:
+      - budget:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s
@@ -124,6 +131,9 @@ services:
 
 volumes:
   pgdata:
+  # Estado do teto diario. Named volume para sobreviver a re-clone do repo,
+  # nao bind relativo (regra de ouro de volumes do CLAUDE.md).
+  budget:
 
 networks:
   proxy:

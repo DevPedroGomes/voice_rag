@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     # Onda 3 — sliding window per-IP session-creation rate limit.
     max_sessions_per_minute_per_ip: int = 10
 
+    # Tetos diarios GLOBAIS. Os limites acima sao por sessao e por IP: eles
+    # bounded o que um visitante faz, nenhum deles bounded o que todos fazem
+    # juntos, nem alguem trocando de IP. As chaves aqui sao do Pedro (Whisper
+    # e TTS na OpenAI, LLM no OpenRouter), entao sem um teto global o unico
+    # que percebe o abuso e a fatura.
+    daily_query_limit: int = 300
+    daily_transcribe_limit: int = 600
+
     # AI models — split intentionally:
     # • llm_provider/llm_model decide o LLM do RAG (pode rodar em OpenRouter,
     #   barato; veja services/agent_service.py).
