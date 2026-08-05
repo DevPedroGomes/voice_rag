@@ -160,7 +160,11 @@ class Settings(BaseSettings):
     # returns 503 — useful for cost control or to disable the mic button
     # without redeploying the frontend.
     enable_stt: bool = True
-    whisper_model: str = "whisper-1"
+    # gpt-4o-transcribe desde 05/08/2026. whisper-1 e hoje o modelo MAIS ANTIGO
+    # do catalogo de audio da OpenAI e perde em WER, especialmente em portugues
+    # e em audio de microfone de navegador — que e exatamente o caso de uso
+    # daqui. Os modelos novos recusam verbose_json; ver transcription_service.
+    whisper_model: str = "gpt-4o-transcribe"
 
     # TTS audio cache (PostgreSQL BYTEA). Caches the full MP3 by
     # SHA256(model + voice + text). 24h TTL by default; the periodic cleanup

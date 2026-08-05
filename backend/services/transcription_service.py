@@ -109,11 +109,19 @@ class TranscriptionService:
         buf.name = filename  # SDK reads .name to determine MIME
 
         try:
+            # `verbose_json` e o unico formato que devolve `.language`, mas SO
+            # o whisper-1 aceita: os modelos gpt-*-transcribe respondem 400 com
+            # "response_format 'verbose_json' is not compatible with...".
+            # Trocar o modelo sem trocar isto quebraria a transcricao inteira.
+            #
+            # Perder o idioma detectado nao e perda funcional: o agente ja casa
+            # o idioma pelo texto da pergunta (ver agent_service) e a rota cai
+            # no language_hint quando nao ha deteccao.
+            formato = "verbose_json" if self._model == "whisper-1" else "json"
             kwargs: dict = {
                 "model": self._model,
                 "file": buf,
-                # verbose_json gives us .language for free when no hint is set.
-                "response_format": "verbose_json",
+                "response_format": formato,
             }
             if language_hint:
                 kwargs["language"] = language_hint

@@ -11,8 +11,17 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the fastembed model at build time (as root, before switching user)
+# O modelo vem de services/embedding_service.py, nao do default da biblioteca:
+# `TextEmbedding()` sem argumento baixava o default do FastEmbed, que por
+# coincidencia era o mesmo. No dia em que a biblioteca mudasse o default — ou em
+# que o servico apontasse para outro modelo, como acabou de acontecer — o build
+# cachearia um e o runtime baixaria outro na primeira requisicao.
 ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding()"
+COPY services/embedding_service.py /tmp/es.py
+RUN python -c "import re,pathlib; from fastembed import TextEmbedding; \
+nome=re.search(r'^EMBEDDING_MODEL = \"(.+)\"', pathlib.Path('/tmp/es.py').read_text(), re.M).group(1); \
+print('pre-baixando', nome); TextEmbedding(model_name=nome)" \
+ && rm /tmp/es.py
 
 COPY . .
 

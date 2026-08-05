@@ -8,7 +8,30 @@ from fastembed import TextEmbedding
 # muda a dimensao, e a coluna `embeddings.embedding` e `vector(384)` fixo. O
 # projeto irmao (group-documents) ficou com a ingestao 100% quebrada por meses
 # exatamente por esse desalinhamento entre modelo e schema.
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+# Multilingue desde 05/08/2026. O anterior era BAAI/bge-small-en-v1.5 — o "en"
+# do nome e literal, e este app e de VOZ, com metade do publico falando
+# portugues.
+#
+# Medido no mesmo par pergunta/resposta com um distrator do mesmo idioma, pela
+# margem de separacao (similaridade da resposta certa menos a do distrator, que
+# e o que decide o ranking):
+#
+#     bge-small-en-v1.5               EN +0.257   PT +0.103
+#     paraphrase-multilingual-MiniLM  EN +0.418   PT +0.386
+#
+# Em portugues a margem antiga caia 60%. Com poucos chunks ainda acertava; num
+# PDF real, com dezenas, o ranking ficava fragil. O novo ganha nos DOIS idiomas.
+#
+# Mesma dimensao 384, entao o schema `vector(384)` nao muda.
+#
+# Nao existe migration de dados aqui, e vale registrar por que: sessao expira em
+# 5 minutos de inatividade e o cleanup apaga os embeddings junto, entao nao ha
+# vetor antigo que sobreviva a troca. Se um dia a base virar persistente,
+# ATENCAO: vetor do modelo velho e do novo tem o MESMO tamanho e espacos
+# vetoriais diferentes — nada quebraria, nenhum erro apareceria, a busca so
+# devolveria o chunk errado com um score plausivel. Nesse dia, re-embeddar
+# passa a ser obrigatorio antes de subir.
+EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 # Tem que bater com vector(N) em `embeddings.embedding`. Mudar exige migration.
 EMBEDDING_DIM = 384
