@@ -18,6 +18,7 @@ import { PDFUpload } from "@/components/pdf-upload";
 import { DocumentList } from "@/components/document-list";
 import { VoiceSelector } from "@/components/voice-selector";
 import { QueryInput } from "@/components/query-input";
+import { LiveVoice } from "@/components/live-voice";
 import { QueryResponseCard } from "@/components/query-response";
 import { ChatHistory } from "@/components/chat-history";
 import { cn } from "@/lib/utils";
@@ -432,6 +433,21 @@ export default function Home() {
           expanded={isReady}
         >
           <div className="space-y-4">
+            {/* Conversa continua: o modelo fala e escuta ao mesmo tempo e
+                chama a busca no meio da frase. Fica ACIMA do campo de texto
+                de proposito — e a diferenca entre esta demo e as outras, e
+                quem chega tem que ver primeiro. O caminho de perguntar por
+                escrito continua logo abaixo, intacto. */}
+            {sessionId && (
+              <>
+                <LiveVoice sessionId={sessionId} pronto={isReady && !isUploading} />
+                <div className="flex items-center gap-3 py-1">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-muted-foreground">or type your question</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              </>
+            )}
             <QueryInput
               onSubmit={handleQuery}
               isLoading={queryLoading}
