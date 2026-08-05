@@ -31,7 +31,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          # 1G desde 05/08/2026, junto com a troca do embedding para o
+          # multilingue: o modelo antigo (bge-small-en) pesava 67 MB, o novo
+          # pesa 220 MB, e com 512m o container ficava em 97,6% no boot — ou
+          # seja, sem folga nenhuma. Qualquer pico (ingestao de PDF grande,
+          # requisicoes concorrentes) virava OOM kill, que aqui aparece como
+          # a demo simplesmente reiniciando no meio de uma pergunta.
+          memory: 1g
     depends_on:
       postgres:
         condition: service_healthy
