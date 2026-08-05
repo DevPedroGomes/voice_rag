@@ -172,6 +172,23 @@ class Settings(BaseSettings):
     enable_tts_cache: bool = True
     tts_cache_ttl_seconds: int = 86400  # 24h
 
+    # ── Realtime: o RAG como tool de uma conversa continua ──────────────────
+    # O resto do app faz um turno por vez: grava, transcreve, recupera, gera,
+    # sintetiza. Aqui o modelo fala e escuta ao mesmo tempo e CHAMA a busca no
+    # meio da frase — a pessoa interrompe, pede pra repetir, muda de assunto e
+    # volta, porque nao existe mais "um turno" a concluir.
+    #
+    # Flag separada porque a conta e outra: uma conversa aberta gasta por
+    # minuto de audio, nao por pergunta. Desligar aqui derruba so o botao de
+    # conversa, sem tocar no fluxo de perguntar-e-ouvir.
+    enable_realtime: bool = True
+    realtime_model: str = "gpt-realtime-2.1"
+    realtime_voice: str = "marin"
+    # Teto proprio, em SESSOES abertas por dia. Deliberadamente baixo: cada uma
+    # pode durar minutos e custa por minuto de audio, entao o teto de perguntas
+    # (300/dia) nao serve de proxy aqui.
+    daily_realtime_limit: int = 40
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

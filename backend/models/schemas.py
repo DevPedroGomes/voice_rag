@@ -132,3 +132,38 @@ class TranscriptionResponse(BaseModel):
     text: str
     language: str | None = None
     duration_ms: int | None = None
+
+
+# ============ Realtime — o RAG como tool de uma conversa contínua ============
+
+class RealtimeSessionResponse(BaseModel):
+    """Credencial efêmera que o navegador usa para abrir o WebRTC.
+
+    `client_secret` é um `ek_...` de vida curta, já amarrado às instruções e à
+    tool de busca no servidor — a chave real da OpenAI nunca sai do backend, e
+    o cliente não consegue reconfigurar a sessão para outra coisa.
+    """
+    client_secret: str
+    expires_at: int
+    model: str
+
+
+class RealtimeToolRequest(BaseModel):
+    """Argumento da tool `buscar_nos_documentos`, como o modelo a chamou."""
+    pergunta: str
+
+
+class RealtimeTrecho(BaseModel):
+    texto: str
+    arquivo: str
+    pagina: int | None = None
+
+
+class RealtimeToolResponse(BaseModel):
+    """Resultado devolvido ao modelo como `function_call_output`.
+
+    Lista vazia com `baixa_confianca` é resposta VÁLIDA, não erro: é o que
+    permite o agente dizer "não está nos documentos" em vez de inventar.
+    """
+    trechos: list[RealtimeTrecho]
+    baixa_confianca: bool = False

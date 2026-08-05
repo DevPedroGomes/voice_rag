@@ -12,6 +12,7 @@ from routers import (
     documents_router,
     query_router,
     transcription_router,
+    realtime_router,
 )
 from routers.query import periodic_cleanup_query_results
 from services.session_service import get_session_store
@@ -185,6 +186,7 @@ app.include_router(session_router)
 app.include_router(documents_router)
 app.include_router(query_router)
 app.include_router(transcription_router)
+app.include_router(realtime_router)
 
 
 @app.get("/")
