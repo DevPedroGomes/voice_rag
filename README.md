@@ -83,12 +83,12 @@ flowchart TD
     class A1,A2,A3 audio
 ```
 
-## Advanced RAG techniques (state in May 2026)
+## Advanced RAG techniques (state in Aug 2026)
 
 | Technique | Status | Implementation |
 |---|---|---|
 | **Hybrid search** (vector + keyword + RRF) | active | Single PostgreSQL CTE round-trip — semantic (pgvector HNSW cosine) and keyword (tsvector GIN with `ts_rank_cd`) rankings fused via Reciprocal Rank Fusion (k=60). One DB call instead of two. |
-| **Cross-encoder reranking** | active | Cohere `rerank-v3.5`. Graceful degradation to RRF order when `COHERE_API_KEY` is missing or the call fails. |
+| **Cross-encoder reranking** | active | Cohere `rerank-4-fast` (`rerank-v3.5` was retired on 1 Jul 2026 and its successor returns a different score distribution). Graceful degradation to RRF order when `COHERE_API_KEY` is missing or the call fails, which is the current production state. |
 | **Contextual Retrieval** (Anthropic, 2024) | active | Claude Haiku enriches each chunk with 2-3 sentences of document-level context before embedding. **Prompt caching** (`cache_control: ephemeral`) on the document so chunks 2..N pay ~10% on the cached document tokens. Async with bounded concurrency (`asyncio.Semaphore(5)`) — a 20-chunk PDF stays under ~3s of additional ingest latency. |
 | **Multi-query expansion** | active | Haiku generates 3 paraphrasings of the user query. The expansion call runs in parallel with the original query's embedding (`asyncio.create_task`); variant embeddings are computed via `asyncio.gather`; hybrid searches fan out via `asyncio.gather` so the four queries don't serialize on the database. Results merged by chunk id (best score wins) before reranking. |
 | **Score-based grader** | active | RRF or Cohere relevance scores compared against tier-specific thresholds. Safety net keeps top-2 when everything is filtered out, plus a `low_confidence` flag the LLM is told about so it acknowledges uncertainty in voice. No LLM call. |
@@ -128,7 +128,7 @@ Audio chunks are PCM (same format as `/audio/stream`), base64-encoded. The front
 
 ## Stack
 
-**Backend** — FastAPI 0.115, asyncpg, pgvector, FastEmbed (ONNX, BAAI/bge-small-en-v1.5), Anthropic SDK (>=0.40, async), Cohere SDK (>=5.13), OpenAI Agents SDK, OpenAI client (TTS + Whisper + chat completions), in-memory rate limiting per IP and per session, `python-multipart`.
+**Backend** — FastAPI >=0.140, asyncpg, pgvector, FastEmbed (ONNX, `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`), Anthropic SDK (>=0.40, async), Cohere SDK (>=5.13), OpenAI Agents SDK, OpenAI client (`gpt-4o-mini-tts` for speech, `gpt-4o-transcribe` for speech-to-text), in-memory rate limiting per IP and per session, `python-multipart`.
 
 **Frontend** — Next.js 16, React 19, Tailwind v4, shadcn/ui, MediaRecorder + Web Audio API for the voice loop.
 
