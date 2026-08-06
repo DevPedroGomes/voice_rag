@@ -1,5 +1,7 @@
 # Voice RAG
 
+[![CI](https://github.com/DevPedroGomes/voice_rag/actions/workflows/deploy.yml/badge.svg)](https://github.com/DevPedroGomes/voice_rag/actions/workflows/deploy.yml)
+
 A voice-enabled Retrieval-Augmented Generation system. Upload PDF documents, ask questions by typing or by speaking into the microphone, and receive grounded answers streamed back as speech in real time. The full voice loop is implemented end-to-end: browser microphone capture, server-side speech-to-text, hybrid retrieval with cross-encoder reranking and multi-query expansion, contextual chunk enrichment, a voice-tuned LLM, and PCM audio streamed over Server-Sent Events directly into the Web Audio API.
 
 Live deployment: https://voicerag.pgdev.com.br
