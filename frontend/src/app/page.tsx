@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 export const metadata = {
-  title: "Voice RAG — Speak the question. Hear the answer.",
+  title: "Voice RAG: Speak the question. Hear the answer.",
   description:
     "Upload PDFs, ask out loud, hear cited answers in natural speech. End-to-end voice loop with hybrid retrieval and streaming TTS.",
 };
@@ -35,7 +35,7 @@ const PIPELINE = [
     n: 2,
     icon: Cpu,
     title: "Embed Locally",
-    desc: "FastEmbed (BAAI/bge-small-en-v1.5) runs on the server — no external embedding API.",
+    desc: "FastEmbed (multilingual MiniLM) runs on the server, so Portuguese and English share one vector space and no embedding API is called.",
     accent: "text-violet-600 bg-violet-50",
   },
   {
@@ -49,7 +49,7 @@ const PIPELINE = [
     n: 4,
     icon: MessageSquare,
     title: "AI Synthesis",
-    desc: "Processor Agent (GPT-4.1-mini) writes a grounded answer with citations.",
+    desc: "Processor Agent (DeepSeek via OpenRouter) writes a grounded answer with citations.",
     accent: "text-orange-600 bg-orange-50",
   },
   {
@@ -65,7 +65,7 @@ const FEATURES = [
   {
     icon: Activity,
     title: "Sub-1.5s first audible word",
-    desc: "Audio starts streaming before the LLM has finished writing — perceived latency drops to near-zero.",
+    desc: "Audio starts streaming before the LLM has finished writing, perceived latency drops to near-zero.",
     span: "md:col-span-2",
   },
   {
@@ -85,8 +85,8 @@ const FEATURES = [
   },
   {
     icon: Sparkles,
-    title: "9 distinct voices",
-    desc: "Coral, alloy, echo, fable, onyx, nova, sage, shimmer, verse — pick a voice that fits the use case.",
+    title: "12 distinct voices",
+    desc: "Coral, alloy, echo, fable, onyx, nova, sage, shimmer, verse, pick a voice that fits the use case.",
     span: "md:col-span-2",
   },
 ];
@@ -98,9 +98,10 @@ const STACK = [
   "PostgreSQL 17",
   "pgvector",
   "FastEmbed (ONNX)",
-  "OpenAI Whisper",
-  "GPT-4.1-mini",
+  "gpt-4o-transcribe",
+  "DeepSeek via OpenRouter",
   "GPT-4o-mini-TTS",
+  "OpenAI Realtime (WebRTC)",
   "OpenAI Agents SDK",
   "Server-Sent Events",
   "Web Audio API",
@@ -203,7 +204,7 @@ export default function LandingPage() {
             style={{ animationDelay: "0.2s" }}
           >
             Upload PDFs, ask out loud, hear cited answers streamed back as natural speech.
-            Full voice loop in production — mic capture, Whisper STT, hybrid retrieval, low-latency TTS.
+            Full voice loop in production: mic capture, gpt-4o-transcribe STT, hybrid retrieval, low-latency TTS.
           </p>
 
           <div
@@ -343,7 +344,7 @@ export default function LandingPage() {
       {/* ─── Footer ─── */}
       <footer className="border-t border-neutral-200/70 bg-white">
         <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-neutral-500">
-          <p>Built by Pedro Gomes — full-stack AI engineer.</p>
+          <p>Built by Pedro Gomes, full-stack AI engineer.</p>
           <div className="flex items-center gap-4">
             <a
               href="https://github.com/devpedrogomes/voice_rag"

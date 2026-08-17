@@ -13,7 +13,7 @@ Live deployment: https://voicerag.pgdev.com.br
 Three Docker services orchestrated with Compose behind Traefik:
 
 - `voicerag-db` — PostgreSQL 17 with the `pgvector` extension. Stores chunk embeddings, sessions, the per-IP rate-limit log, and the TTS audio cache.
-- `voicerag-backend` — FastAPI app exposing session, document, query, transcription, and streaming endpoints. Owns embeddings, retrieval, the OpenAI Agents-SDK processor, Whisper STT, gpt-4o-mini-tts streaming, and the new sentence-pipelined streaming endpoint.
+- `voicerag-backend` — FastAPI app exposing session, document, query, transcription, and streaming endpoints. Owns embeddings, retrieval, the OpenAI Agents-SDK processor, gpt-4o-transcribe STT, gpt-4o-mini-tts streaming, the sentence-pipelined streaming endpoint and the realtime (WebRTC) session broker.
 - `voicerag-frontend` — Next.js 16 / React 19 app with a Web Audio API streaming player and a `MediaRecorder`-based microphone recorder. Marketing landing at `/`, the interactive app at `/app`.
 
 Multi-tenancy is session-scoped: each browser gets a UUID stored in `localStorage`, every Postgres row carries that `session_id`, and a background task evicts inactive sessions together with their vectors. Embeddings run locally in the backend via FastEmbed (ONNX), so document ingestion does not require an external embedding API key.
@@ -31,7 +31,7 @@ flowchart TD
         P25 -->|yes| P26["Contextual Retrieval<br/>(Claude Haiku + prompt caching)<br/>2-3 sentences of doc context<br/>prepended per chunk"]
         P25 -->|no| P3
         P26 --> P3
-        P3["FastEmbed<br/>BAAI/bge-small-en-v1.5<br/>384-dim, local ONNX"]
+        P3["FastEmbed<br/>paraphrase-multilingual-MiniLM-L12-v2<br/>384-dim, local ONNX"]
         P3 --> P4["pgvector + tsvector<br/>(HNSW + GIN, scoped by session_id)"]
     end
 
@@ -53,7 +53,7 @@ flowchart TD
 
     %% ── Voice query path (POST /query/stream) ─────────────────────────
     subgraph VOICE["Streaming voice loop (/query/stream)"]
-        M1[Browser microphone] -->|MediaRecorder| T1[Whisper STT]
+        M1[Browser microphone] -->|MediaRecorder| T1[gpt-4o-transcribe STT]
         T1 --> Q1S[user query string]
         Q1S --> S1["Same retrieval pipeline<br/>(multi-query → hybrid → rerank → grade)"]
         S1 --> S2["agent_service.stream_response<br/>(AsyncOpenAI chat.completions stream=True)"]
@@ -92,7 +92,7 @@ flowchart TD
 | **Contextual Retrieval** (Anthropic, 2024) | active | Claude Haiku enriches each chunk with 2-3 sentences of document-level context before embedding. **Prompt caching** (`cache_control: ephemeral`) on the document so chunks 2..N pay ~10% on the cached document tokens. Async with bounded concurrency (`asyncio.Semaphore(5)`) — a 20-chunk PDF stays under ~3s of additional ingest latency. |
 | **Multi-query expansion** | active | Haiku generates 3 paraphrasings of the user query. The expansion call runs in parallel with the original query's embedding (`asyncio.create_task`); variant embeddings are computed via `asyncio.gather`; hybrid searches fan out via `asyncio.gather` so the four queries don't serialize on the database. Results merged by chunk id (best score wins) before reranking. |
 | **Score-based grader** | active | RRF or Cohere relevance scores compared against tier-specific thresholds. Safety net keeps top-2 when everything is filtered out, plus a `low_confidence` flag the LLM is told about so it acknowledges uncertainty in voice. No LLM call. |
-| **Sentence-pipelined TTS** | active | The streaming endpoint detects sentence boundaries on the LLM's text deltas and spawns per-sentence TTS tasks via `asyncio.Semaphore(4)`. Audio for sentence #1 starts while the LLM is still writing sentence #2 — first-audible-word drops from ~1500 ms to ~600 ms. |
+| **Sentence-pipelined TTS** | active | The streaming endpoint detects sentence boundaries on the LLM's text deltas and spawns per-sentence TTS tasks via `asyncio.Semaphore(4)`. Audio for sentence #1 starts while the LLM is still writing sentence #2, so first-audible-word drops from ~1500 ms to ~600 ms. The web UI does not call this endpoint: it posts to `/query` and plays the audio SSE, and the lowest-latency path in the UI today is the realtime (WebRTC) mode. |
 | **Voice-mode prompting** | active | System prompt is voice-tuned: short answers, no markdown, no URLs read aloud, language matching. Untrusted retrieved chunks wrapped in `<document source="…">` tags with `</document>` escape neutralization (prompt-injection mitigation). |
 | **TTS cache** | active | PostgreSQL BYTEA cache keyed by `(model, voice, text)` so identical answers don't re-synthesize. 24h TTL by default. |
 
@@ -104,7 +104,7 @@ Each LLM-using technique gracefully degrades when its API key is missing — voi
 POST   /api/session                                  Create session, returns quota info
 POST   /api/session/{id}/documents                   Upload PDF (runs Contextual Retrieval enrichment when key present)
 DELETE /api/session/{id}/documents/{document_id}     Remove a document and its embeddings
-POST   /api/session/{id}/transcribe                  Whisper STT for audio blob
+POST   /api/session/{id}/transcribe                  gpt-4o-transcribe STT for audio blob
 POST   /api/session/{id}/query                       Sync — JSON response + audio_stream_url
 POST   /api/session/{id}/query/stream                SSE — interleaved text_delta + audio_chunk events
 GET    /api/session/{id}/queries                     Query history
@@ -167,7 +167,7 @@ npm run dev
 Required env vars (backend `.env`):
 
 ```env
-OPENAI_API_KEY=sk-...                                      # required (TTS + Whisper, optionally Agents)
+OPENAI_API_KEY=sk-...                                      # required (TTS + STT + realtime, optionally Agents)
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/voicerag
 
 # Optional — each missing key disables one technique gracefully

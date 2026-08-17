@@ -5,8 +5,13 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+// O backend corta em 10MB (max_file_size_mb no config.py). O cliente
+// aceitava 50MB, entao o visitante subia um PDF grande e so descobria o
+// limite no erro do servidor.
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ACCEPTED_TYPES = ["application/pdf"];
+const SAMPLE_URL = "/samples/aurora-coffee-handbook.pdf";
+const SAMPLE_NAME = "aurora-coffee-handbook.pdf";
 
 function validateFile(file: File): string | null {
   if (!ACCEPTED_TYPES.includes(file.type)) {
@@ -46,6 +51,22 @@ export function PDFUpload({ onUpload, isUploading, disabled }: PDFUploadProps) {
     },
     [onUpload]
   );
+
+  // Quem chega sem PDF a mao nao tinha como ver a demo funcionar: a tela
+  // pedia um arquivo e acabava ali. O exemplo e um handbook de suporte
+  // ficticio, com secoes em ingles e um FAQ em portugues, que mostra o
+  // retrieval multilingue sem depender do arquivo do visitante.
+  const handleSampleLoad = useCallback(async () => {
+    try {
+      const res = await fetch(SAMPLE_URL);
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const file = new File([blob], SAMPLE_NAME, { type: "application/pdf" });
+      await onUpload(file);
+    } catch {
+      toast.error("Could not load the sample document.");
+    }
+  }, [onUpload]);
 
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -114,16 +135,27 @@ export function PDFUpload({ onUpload, isUploading, disabled }: PDFUploadProps) {
           disabled={isUploading || disabled}
         />
 
-        <Button
-          variant="outline"
-          size="sm"
-          asChild
-          disabled={isUploading || disabled}
-        >
-          <label htmlFor="pdf-upload" className="cursor-pointer">
-            {isUploading ? "Uploading..." : "Select PDF"}
-          </label>
-        </Button>
+        <div className="flex flex-col items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            disabled={isUploading || disabled}
+          >
+            <label htmlFor="pdf-upload" className="cursor-pointer">
+              {isUploading ? "Uploading..." : "Select PDF"}
+            </label>
+          </Button>
+
+          <button
+            type="button"
+            onClick={handleSampleLoad}
+            disabled={isUploading || disabled}
+            className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            No PDF at hand? Use a sample document
+          </button>
+        </div>
       </div>
     </Card>
   );
