@@ -130,6 +130,10 @@ async def rerank_documents(
         # Preserve original RRF for observability/debug.
         new_doc["rrf_score"] = original.get("score", 0.0)
         new_doc["score"] = float(result.relevance_score)
+        # Marca que `score` esta na escala calibrada da Cohere ([0,1]) e nao na
+        # escala RRF (~0.01-0.03). Quem aplica threshold precisa saber a
+        # diferenca: todos os caminhos de degradacao acima retornam sem a flag.
+        new_doc["reranked"] = True
         reranked.append(new_doc)
 
     return reranked

@@ -132,8 +132,11 @@ services:
       - "traefik.http.middlewares.voicerag-security.headers.frameDeny=true"
       # CSP: era o unico dos 3 showcases sem esta politica.
       # connect-src precisa do dominio da API (fetch + SSE de audio); blob:/data:
-      # cobrem o PCM decodificado na Web Audio API.
-      - "traefik.http.middlewares.voicerag-security.headers.contentSecurityPolicy=default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob: data:; connect-src 'self' https://voicerag-api.pgdev.com.br; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+      # cobrem o PCM decodificado na Web Audio API. api.openai.com entra porque
+      # o modo de conversa ao vivo troca o SDP do WebRTC direto com
+      # https://api.openai.com/v1/realtime/calls (lib/realtime-session.ts): sem
+      # ele o botao falhava para todo visitante, com erro de CSP no console.
+      - "traefik.http.middlewares.voicerag-security.headers.contentSecurityPolicy=default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob: data:; connect-src 'self' https://voicerag-api.pgdev.com.br https://api.openai.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 volumes:
   pgdata:

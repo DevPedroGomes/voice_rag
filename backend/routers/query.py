@@ -153,9 +153,16 @@ async def _retrieve_and_grade(
             api_key=settings.cohere_api_key,
         )
 
+    # O threshold precisa acompanhar a escala do `score` que sobrou, e nao a
+    # intencao do config: com ENABLE_RERANKER=true mas sem COHERE_API_KEY (ou
+    # com a Cohere fora do ar), o rerank degrada para a ordem RRF e os scores
+    # ficam em ~0.01-0.03. Comparados contra 0.30 reprovavam sempre, e toda
+    # resposta saia com o aviso de baixa confianca. `reranked` so vem marcado
+    # quando o rerank realmente rodou.
+    reranked = any(r.get("reranked") for r in search_results)
     threshold = (
         settings.relevance_threshold_reranked
-        if settings.enable_reranker
+        if reranked
         else settings.relevance_threshold
     )
     graded_results, low_confidence = grade_documents(
@@ -171,7 +178,7 @@ async def _retrieve_and_grade(
             len(graded_results),
             len(search_results),
             threshold,
-            settings.enable_reranker,
+            reranked,
         )
 
     return graded_results, low_confidence
