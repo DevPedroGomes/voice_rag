@@ -17,6 +17,14 @@ Thumbs.db
 # Local docs / scratchpads — only README.md is published
 *.md
 !README.md
+# Excecoes deliberadas (06/09/2026): o CLAUDE.md e o docs/ precisam viajar com o
+# repo. Ate aqui o CLAUDE.md existia SO no clone da VPS, entao uma sessao aberta
+# em outra maquina nao via nenhuma das regras dele. Com a aposentadoria decidida,
+# o aviso de "nao construa feature aqui" e o inventario da extracao sao
+# exatamente o que a proxima sessao precisa encontrar.
+!CLAUDE.md
+!docs/
+!docs/**/*.md
 
 # Logs
 *.log
